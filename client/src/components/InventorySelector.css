@@ -1,0 +1,227 @@
+@font-face {
+  font-family: 'ScorchFont'; /* Give your font a name */
+  src: url('fonts/font.ttf') format('truetype');
+}
+
+/* Container for the entire selector (weapon or item) */
+.inventory-selector {
+  position: relative;
+  margin-bottom: 10px;
+}
+
+/* Row that contains both the selected button (75%) and the Fire/Use button (25%) */
+.selected-inventory-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  justify-content: space-between;
+}
+
+/* The main "selected" button that toggles the dropdown */
+.inventory-selector-button {
+  width: 100%;
+  padding: 10px;
+  background-color: #333333bc;
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  position: relative;
+  border-radius: 5px;
+}
+
+.inventory-selector-button:hover {
+  background-color: #244b32c2;
+}
+
+
+/* The Fire/Use button goes in its own wrapper that is 25% wide */
+.fire-use-button-wrapper {
+  width: 25%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-right: 0.5rem;
+}
+
+/* Info inside the main 75% button (icon, name, etc.) */
+.inventory-info {
+  display: flex;
+  align-items: center;
+  font-family: 'ScorchFont';
+}
+
+.inventory-icon {
+  width: 40px;
+  height: 40px;
+  margin-right: 10px;
+}
+
+.inventory-details {
+  display: flex;
+  flex-direction: column;
+  font-family: 'ScorchFont';
+  font-size: 2em;
+}
+
+.inventory-quantity {
+  font-size: 0.85em;
+  color: #00ff59;
+}
+
+/* The dropdown list container */
+.inventory-dropdown {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  width: 100%;
+  background-color: #44444400;
+  z-index: 1000;
+  max-height: 385px;
+  overflow-y: auto;
+  border-radius: 5px;
+  margin-bottom: 20px;
+  scrollbar-width: thin;
+  scrollbar-color: #158a3e #2a2a2a;
+}
+
+.inventory-dropdown::-webkit-scrollbar {
+  width: 8px;
+}
+
+.inventory-dropdown::-webkit-scrollbar-track {
+  background: #361786;
+  border-radius: 4px;
+  box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.3);
+}
+
+.inventory-dropdown::-webkit-scrollbar-thumb {
+  background: linear-gradient(45deg, #00ff59, #00cc47);
+  border-radius: 4px;
+  border: 2px solid #16116d;
+}
+
+.inventory-dropdown::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(45deg, #260765, #00e651);
+  box-shadow: 0 0 8px rgba(0, 255, 89, 0.5);
+}
+
+.inventory-dropdown::-webkit-scrollbar-thumb:active {
+  background: linear-gradient(45deg, #ff0088, #00ff59);
+  box-shadow: 0 0 12px rgba(0, 255, 89, 0.8);
+}
+
+/* Each item in the dropdown (weapon or item) */
+.inventory-item {
+  width: 95%;
+  padding: 10px;
+  background-color: #555555c2;
+  color: #fff;
+  border: 2px solid #16116d;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  border-radius: 20px;
+  margin-bottom: 5px;
+  font-family: 'ScorchFont';
+  font-size: 12px;
+
+}
+
+.inventory-item:hover,
+.inventory-item.selected {
+  background-color: #357739e6;
+}
+
+/* Details inside each item row */
+.inventory-item-details {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+;
+}
+
+.inventory-item-top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.inventory-item-name {
+  font-size: 2em;
+}
+
+.inventory-item-quantity {
+  font-size: 2em;
+  color: #00ff59;
+  margin-left: auto;
+}
+
+.inventory-item-description {
+  font-size: 1.5em;
+  color: #afafaf;
+  text-align: left;
+}
+
+/* For "No Weapons" or "No Items" labels */
+.no-inventory {
+  padding: 10px;
+  color: #e10606;
+  align-items: center;
+  font-size: 30px;
+}
+
+/* React Transition Group classes for dropdown animation */
+
+/* Transition for items (slides from left) */
+/* Entering state */
+.dropdown-item-enter {
+  opacity: 0;
+  transform: translateX(-700px);
+}
+
+.dropdown-item-enter-active {
+  opacity: 1;
+  transform: translateX(0);
+  transition: opacity 400ms ease-out, transform 400ms ease-out;
+}
+
+/* Exiting state */
+.dropdown-item-exit {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.dropdown-item-exit-active { 
+  opacity: 0;
+  transform: translateX(700px);
+  transition: opacity 400ms ease-out, transform 400ms ease-out;
+}
+
+/* Transition for weapons (slides from right) */
+/* Entering state */
+.dropdown-weapon-enter {
+  opacity: 0;
+  transform: translateX(700px);
+}
+
+.dropdown-weapon-enter-active {
+  opacity: 1;
+  transform: translateX(0);
+  transition: opacity 400ms ease-out, transform 400ms ease-out;
+}
+
+/* Exiting state */
+.dropdown-weapon-exit {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.dropdown-weapon-exit-active { 
+  opacity: 0;
+  transform: translateX(-700px);
+  transition: opacity 400ms ease-out, transform 400ms ease-out;
+}

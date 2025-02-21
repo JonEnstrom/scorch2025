@@ -1,0 +1,110 @@
+.chat-container {
+  position: fixed;
+  bottom: 150px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 300px;
+  height: 400px;
+  background-color: rgba(0, 0, 0, 0);
+  color: white;
+  display: flex;
+  flex-direction: column;
+  border-radius: 10px;
+  z-index: 999;
+  padding: 0.5rem;
+  pointer-events: none; /* Keep pointer-events: none here */
+}
+
+.messages-container {
+  flex: 1;
+  overflow-y: auto;
+  margin-bottom: 0.5rem;
+  padding: 0.5rem;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  opacity: 1;
+  transition: none;
+  pointer-events: none; /* Keep pointer-events: none here */
+}
+
+.messages-container.fade {
+  opacity: 0;
+  transition: opacity 10s ease-out;
+}
+
+.messages-wrapper {
+  display: flex;
+  flex-direction: column;
+  pointer-events: none; /* Ensure messages don't capture clicks */
+}
+
+.messages-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.messages-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.messages-container::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.3);
+  border-radius: 3px;
+}
+
+.message {
+  margin-bottom: 0.5rem;
+  word-wrap: break-word;
+  pointer-events: none; /* Ensure individual messages don't capture clicks */
+}
+
+.player-name {
+  color: #aaa;
+  font-size: 0.9em;
+}
+
+.message-text {
+  color: white;
+}
+
+.chat-input-form {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  background-color: rgba(28, 241, 0, 0.033);
+  border-radius: 5px;
+  pointer-events: auto; /* Explicitly enable pointer events for the form */
+}
+
+.chat-input {
+  flex: 1;
+  background-color: rgba(0, 0, 0, 0.107);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: white;
+  padding: 0.5rem;
+  border-radius: 5px;
+  outline: none;
+  pointer-events: auto; /* Ensure input is clickable */
+}
+
+.chat-input:focus {
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.chat-send-button {
+  background-color: rgba(0, 197, 30, 0.125);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  padding: 0.5rem 1rem;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background-color 0.2s, border-color 0.2s;
+  pointer-events: auto; /* Ensure button is clickable */
+}
+
+.chat-send-button:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.4);
+}

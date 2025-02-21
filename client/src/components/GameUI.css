@@ -1,0 +1,96 @@
+.game-container {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  background-color: black;
+  color: white;
+  display: flex;
+  flex-direction: column;
+}
+
+.player-info-section {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  color: white;
+}
+
+.main-content {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.weapon-selector {
+  position: fixed;
+  bottom: 35px;     
+  left: 25%;
+  transform: translateX(-50%);
+  width: 400px;
+  background-color: #0000007f;
+  padding: 0.3rem;
+  z-index: 999;
+  border-radius: 10px;
+}
+
+.item-selector {
+  position: fixed;
+  bottom: 35px;     
+  left: 75%;
+  transform: translateX(-50%);
+  width: 400px;
+  background-color: #0000007f;
+  padding: 0.3rem;
+  z-index: 999;
+  border-radius: 10px;
+}
+
+.player-list-panel {
+  position: fixed;
+  top: 25px;
+  left: 25px; 
+  width: 350px;
+  padding: 0.5rem;
+  z-index: 999;
+  border-radius: 10px;
+}
+
+.cash-display {
+  position: fixed;
+  background-color: rgba(0, 0, 0, 0.488);
+  top: 5px;
+  right: 200px; 
+  padding: 0.5rem;
+  z-index: 999;
+  border-radius: 10px;
+  font-size: 40px;
+  font-family: 'ScorchFont';
+}
+
+.notification-area {
+  position: fixed;
+  top: 33vh;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: rgba(0, 0, 0, 0.95); /* Made darker for testing */
+  color: white;
+  padding: 1rem 2rem;
+  border-radius: 10px;
+  font-size: 2rem;
+  text-align: center;
+  z-index: 9999; /* Increased z-index to make sure it's on top */
+  opacity: 1;
+  transition: opacity 1s ease-out;
+  font-family: 'ScorchFont';
+  max-width: 80%;
+  border: 2px solid red; /* Added for testing */
+  pointer-events: none;
+
+}
+
+.notification-area.fade-out {
+  opacity: 0;
+}

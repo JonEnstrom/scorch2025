@@ -1,0 +1,466 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: Arial, sans-serif;
+  color: #ffffff;
+  background: url('images/lobby_background.jpg') no-repeat center center fixed;
+  background-size: cover;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+h1 {
+  text-align: center;
+  margin: 1rem 0;
+  font-size: 4rem;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
+}
+
+#lobby-container {
+  display: flex;
+  flex-direction: column;
+  width: 90%;
+  max-width: 1200px;
+  margin: 0 auto 1rem;
+  flex: 1;
+}
+
+#name-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  background-color: rgba(0, 0, 0, 0.6);
+  padding: 1rem;
+  border-radius: 8px;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+}
+
+#main-content-container {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 2rem;
+  flex: 1;
+}
+
+#games-list-container {
+  flex: 1;
+  background-color: rgba(0, 0, 0, 0.6);
+  border-radius: 8px;
+  padding: 1rem;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+}
+
+.header-container {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.header-container h2 {
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+.header-buttons {
+  display: flex;
+  gap: 1rem;
+}
+
+#players-container {
+  width: 400px;
+  min-width: 220px;
+  background-color: rgba(0, 0, 0, 0.6);
+  border-radius: 8px;
+  padding: 1rem;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+}
+
+#players-container h2 {
+  margin-bottom: 0.5rem;
+  text-align: center;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+.player-id {
+  font-family: 'Courier New', monospace;
+  font-size: 0.8em;
+  opacity: 0.8;
+}
+
+label {
+  margin: 0 0.25rem;
+  align-self: center;
+  font-weight: bold;
+}
+
+input, select {
+  padding: 0.25rem 0.4rem;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+  margin: 0 0.5rem;
+  font-size: 1rem;
+}
+
+button {
+  background-color: #FF6600;
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 1rem;
+  padding: 0.6rem 1.2rem;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+button:hover {
+  background-color: #FF7F2A;
+}
+
+ul {
+  list-style: none;
+  margin: 1rem 0 0 0;
+  padding: 0;
+}
+
+li {
+  background-color: rgba(255, 255, 255, 0.1);
+  margin-bottom: 0.5rem;
+  padding: 0.75rem;
+  border-radius: 4px;
+  transition: background-color 0.3s;
+}
+
+li:hover {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+.input-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.game-settings {
+  margin-bottom: 1rem;
+}
+
+/* ------------------------- */
+/* Modal CSS */
+/* ------------------------- */
+.modal {
+  display: none; /* Hidden by default */
+  position: fixed;
+  z-index: 1000;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  background-color: rgba(0, 0, 0, 0.6);
+  justify-content: center;
+  align-items: center;
+}
+
+.modal-content {
+  background-color: #1b1b1bdd;
+  margin: auto;
+  padding: 20px;
+  border: 1px solid #888;
+  border-radius: 8px;
+  width: 90%;
+  max-width: 600px;
+  position: relative;
+  color: #fff;
+}
+
+.close-button {
+  position: absolute;
+  top: 10px;
+  right: 15px;
+  font-size: 24px;
+  cursor: pointer;
+}
+
+.player-slot {
+  margin-bottom: 15px;
+}
+
+.player-slot label {
+  margin-right: 10px;
+  font-weight: bold;
+}
+
+.player-slot select {
+  padding: 5px;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+  font-size: 1rem;
+}
+
+.modal-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.modal-buttons button {
+  padding: 0.6rem 1.2rem;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 1rem;
+}
+
+#cancel-btn {
+  background-color: #888;
+  color: #fff;
+}
+
+#cancel-btn:hover {
+  background-color: #aaa;
+}
+
+#submit-btn {
+  background-color: #FF6600;
+  color: #fff;
+}
+
+#submit-btn:hover {
+  background-color: #FF7F2A;
+}
+
+/* Grid container: 4 items per row with small gaps */
+.game-slots-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+
+/* Emphasize open slots with a green background and pointer cursor */
+.slot-content.open-slot {
+  background-color: #00cd07;
+  color: #fff;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.slot-content.closed-slot {
+  background-color: #ff22004d;
+  color: #fff;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+/* Style for the human/CPU type label positioned in the top-right corner */
+.player-type-label {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  font-weight: bold;
+}
+
+.game-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.spectate-btn {
+  background-color: #4CAF50;
+  color: white;
+  padding: 0.4rem 0.8rem;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  margin-left: 1rem;
+}
+
+.spectate-btn:hover {
+  background-color: #45a049;
+}
+
+.health-bar-container {
+  position: absolute;
+  bottom: 2px;
+  left: 2px;
+  right: 2px;
+  height: 4px;
+  background-color: rgba(0, 0, 0, 0.3);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.health-bar {
+  height: 100%;
+  background-color: #2ecc71;
+  transition: width 0.3s ease;
+  border-radius: 2px;
+}
+
+.health-bar.low-health {
+  background-color: #e74c3c;
+}
+
+.health-bar.medium-health {
+  background-color: #f1c40f;
+}
+
+.game-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+  padding: 0.3rem 0.5rem;
+  background-color: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+
+.round-info {
+  font-size: 0.8rem;
+  color: #fff;
+  padding: 0.2rem 0.5rem;
+  background-color: rgba(0, 0, 0, 0.3);
+  border-radius: 3px;
+}
+
+.round-info.shopping {
+  color: #ffd700;
+}
+
+.round-info.in-progress {
+  color: #2ecc71;
+}
+
+.games-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.filter-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Toggle Switch Styles */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 50px;
+  height: 22px;
+}
+
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ccc;
+  transition: .4s;
+}
+
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 15px;
+  width: 15px;
+  left: 4px;
+  bottom: 4px;
+  background-color: white;
+  transition: .4s;
+}
+
+input:checked + .slider {
+  background-color: #2196F3;
+}
+
+input:checked + .slider:before {
+  transform: translateX(26px);
+}
+
+.slider.round {
+  border-radius: 34px;
+}
+
+.slider.round:before {
+  border-radius: 50%;
+}
+
+#privateGameName[readonly] {
+  background-color: #f0f0f0;
+  cursor: not-allowed;
+}
+
+@font-face {
+  font-family: 'Stencil';
+  src: url('fonts/Stencil.ttf') format('truetype');
+}
+
+.game-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.3rem;
+  border-radius: 4px;
+  background-color: rgba(0, 0, 0, 0.2);
+  font-size: 0.6rem;
+  position: relative; /* Ensure positioning context for overlay */
+  min-height: 40px; /* Ensure consistent height */
+}
+
+.kia-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.36);
+  border-radius: 4px;
+  z-index: 1;
+}
+
+.kia-text {
+  font-family: 'Stencil', sans-serif;
+  font-size: 24px;
+  color: #ff4444;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+  transform: rotate(-5deg);
+  letter-spacing: 2px;
+}
+
+/* Update slot content to work with overlay */
+.slot-content {
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+  position: relative;
+  z-index: 0;
+}

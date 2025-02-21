@@ -1,0 +1,40 @@
+/* src/components/LongPressButton.css */
+
+.long-press-button {
+    padding: 15px 25px;  /* reduce from 10px 20px */
+    border: none;       /* ensure no border */
+    border-radius: 10px; /* or 0 if you want sharp corners */
+    outline: none;
+    background-color: #b6b6b6;
+    
+
+  }  
+  /* Basic hover/focus styling */
+  .long-press-button:hover {
+    background-color: #888888;
+  }
+  .long-press-button:active {
+    background-color: #242424;
+  }
+  
+/* LongPressButton.css */
+
+.LPprogress-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    height: 60px; /* bigger than before */
+    width: 100%;
+    background-color: rgba(255, 255, 255, 0); /* a faint background */
+  }
+  
+  .LPprogress-fill {
+    height: 100%;
+    background-color: #009f2a66; /* bright red to stand out */
+    width: 0;
+    transition: width 0.05s linear; /* so it updates smoothly */
+  }
+  
+  button, a, [role="button"], [type="button"] {
+    cursor: inherit !important;
+  }

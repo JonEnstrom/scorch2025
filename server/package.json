@@ -1,0 +1,30 @@
+{
+  "name": "server",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "connect-session-knex": "^5.0.0",
+    "cookie-parser": "^1.4.7",
+    "events": "^3.3.0",
+    "express": "^4.21.2",
+    "express-session": "^1.18.1",
+    "gl-matrix": "^3.4.3",
+    "knex": "^3.1.0",
+    "react-transition-group": "^4.4.5",
+    "simplex-noise": "^4.0.3",
+    "socket.io": "^4.8.1",
+    "sqlite": "^5.1.1",
+    "sqlite3": "^5.1.7",
+    "three": "^0.172.0",
+    "uuid": "^11.0.5"
+  }
+}

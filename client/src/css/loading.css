@@ -1,0 +1,78 @@
+/* loading.css - Loading screen styles */
+.loading-screen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: black;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    opacity: 1;
+    transition: opacity 2s ease-out;
+}
+
+.loading-background {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-image: url('/images/loading_background.jpg');
+    background-size: cover;
+    background-position: center;
+    opacity: 0.2;
+}
+
+.loading-content {
+    position: relative;
+    z-index: 1;
+    text-align: center;
+    opacity: 1;
+    transition: opacity 2s ease-out;
+}
+
+.loading-title {
+    color: white;
+    font-size: 2rem;
+    margin-bottom: 20px;
+    font-family: 'MyCustomFont';
+    src: url('fonts/Xirod.otf') format('opentype');
+  
+}
+
+.progress-bar-container {
+    width: 300px;
+    height: 20px;
+    background-color: #333;
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.progress-bar {
+    width: 0%;
+    height: 100%;
+    background-color: #4a90e2;
+    transition: width 2s ease-out;
+}
+
+.progress-text {
+    color: white;
+    margin-top: 10px;
+    font-size: 1rem;
+}
+
+.loading-screen.fade-content .loading-content {
+    opacity: 0;
+}
+
+.loading-screen.fade-out {
+    opacity: 0;
+}
+
+.loading-screen.hidden {
+    display: none;
+}

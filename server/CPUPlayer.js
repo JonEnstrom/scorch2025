@@ -1,5 +1,4 @@
 import Player from './Player.js';
-import { Projectile } from './Projectile.js';
 import * as THREE from 'three';
 
 export default class CPUPlayer extends Player {
@@ -56,50 +55,83 @@ export default class CPUPlayer extends Player {
   }
 
   simulateProjectile(startPos, direction, power, gameInstance) {
-    const projectile = new Projectile(
-      startPos,
-      direction,
-      power,
-      'simulation',
-      gameInstance.theme
+    // Construct the initial projectile data object.
+    // You can add/omit fields as needed. 
+    // Note that `simulateProjectiles` expects an array (since some weapons can fire multiple sub-projectiles).
+    const projectilesData = [{
+      startPos: startPos.clone(),
+      direction: direction.clone(),
+      power: power,
+      // Is this the final projectile? Typically yes for a single shot.
+      isFinalProjectile: true,
+  
+      // Example defaults — adapt to your needs
+      bounceCount: 0,
+      doesCollide: true,
+      craterSize: 20,
+      aoeSize: 50,
+      baseDamage: 50,
+      explosionSize: 1,
+      explosionType: 'normal',
+      projectileStyle: 'missile',
+      projectileScale: 1,
+      theme: gameInstance.theme || 'default',
+    }];
+  
+    // We'll assume "BW01" for basic weapon code, or whichever you're testing
+    const weaponId   = 'BasicWeapon';  // Some internal ID or name
+    const weaponCode = 'BW01';         // The item/weapon code
+  
+    // Pre-simulate the entire flight.  This returns an array of timeline events.
+    const timelineEvents = gameInstance.projectileManager.simulateProjectiles(
+      this.id,           // CPU player's ID
+      projectilesData,   // Our single initial projectile
+      weaponId, 
+      weaponCode
     );
-
-    let time = 0;
-    const timeStep = 0.016;
-    const maxTime = 10;
-    
-    while (time < maxTime) {
-      const collision = projectile.update(
-        timeStep, 
-        gameInstance.terrainManager,
-        gameInstance.playerManager.getPlayersObject()
-      );
-      
-      if (collision) {
-        return collision;
-      }
-      
-      time += timeStep;
+  
+    // Find the first impact event if it exists
+    const impactEvent = timelineEvents.find(evt => evt.type === 'projectileImpact');
+    if (!impactEvent) {
+      // No impact => either it timed out (projectileExpired) or something else
+      return null;
     }
-    
-    return null;
+  
+    // If we have an impact, we can see exactly where it hit terrain
+    const impactPos = new THREE.Vector3(
+      impactEvent.position.x,
+      impactEvent.position.y,
+      impactEvent.position.z
+    );
+  
+    // Return something like the old “collision” info
+    return {
+      position: impactPos,
+      // You can include any other details you want:
+      time: impactEvent.time,
+      // e.g. was it a helicopter hit?
+      isHelicopterHit: impactEvent.isHelicopterHit || false,
+      // etc.
+    };
   }
-
+  
   calculateFiringSolution(target, gameInstance) {
     const myPos = this.getPosition();
     const targetPos = target.getPosition();
-    
+  
     const numTests = 10;
     const solutions = [];
-    
+  
     for (let i = 0; i < numTests; i++) {
       const pitch = this.minPitch + (Math.random() * (this.maxPitch - this.minPitch));
       const power = this.minPower + (Math.random() * (this.maxPower - this.minPower));
-      
+  
+      // Yaw calculation (same as before)
       const dx = targetPos.x - myPos.x;
       const dz = targetPos.z - myPos.z;
       const yaw = (Math.atan2(dx, dz) * 180 / Math.PI + 360) % 360;
-      
+  
+      // Build direction Vector3
       const direction = new THREE.Vector3(0, 0, 1);
       const euler = new THREE.Euler(
         THREE.MathUtils.degToRad(pitch),
@@ -108,22 +140,20 @@ export default class CPUPlayer extends Player {
         'YXZ'
       );
       direction.applyEuler(euler);
-      
+  
+      // Now call the new simulateProjectile
       const collision = this.simulateProjectile(
         this.getBarrelTip(),
         direction,
         power,
         gameInstance
       );
-      
-      if (collision) {
-        const hitPos = new THREE.Vector3(
-          collision.position.x,
-          collision.position.y,
-          collision.position.z
-        );
+  
+      // If we got an impact, measure how close it is to target.
+      if (collision && collision.position) {
+        const hitPos = collision.position;
         const distanceToTarget = hitPos.distanceTo(targetPos);
-        
+  
         solutions.push({
           pitch,
           yaw,
@@ -133,15 +163,16 @@ export default class CPUPlayer extends Player {
         });
       }
     }
-    
+  
+    // Sort results by distance to find the "best" shot
     if (solutions.length > 0) {
       solutions.sort((a, b) => a.distance - b.distance);
       return solutions[0];
     }
-    
+  
     return null;
   }
-
+  
   getAvailableWeapons() {
     const weaponCodes = ['BW01', 'CW01', 'BB01', 'BR01', 'VW01', 'MM01', 'RF01', 'MS01'];
     return weaponCodes.filter(code => this.hasItem(code));

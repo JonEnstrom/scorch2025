@@ -79,18 +79,21 @@ export class CameraManager {
         // --------------------
         this.chaseDistance = 80;
         this.chaseHeight = 150;
-        this.chaseProjectiles = new Map();
 
         // --------------------
         //   Projectile View
         // --------------------
-        this.projectileOffset = new THREE.Vector3(0, 50, 0);
-        this.projectileRotationOffset = new THREE.Euler(Math.PI / 4, Math.PI, Math.PI / 2);
+        this.projectileOffset = new THREE.Vector3(0, 100, 10);
+        this.projectileRotationOffset = new THREE.Euler(-Math.PI / 4, Math.PI, 0);
         this.currentProjectile = null;
         this.projectileLerpSpeed = 1.0;
         this.hasReachedApex = false;
         this.apexPosition = null;
         this.initialProjectileHeight = null;
+
+        // We'll track the last position to approximate forward direction
+        // in projectile view (since velocity is gone).
+        this.lastProjectilePos = new THREE.Vector3();
 
         // --------------------
         //   Clipping settings
@@ -247,10 +250,10 @@ export class CameraManager {
                 this.camera.fov = 90; // Wide FOV for more dramatic effect
                 this.game.doNormalView();
                 this.camera.updateProjectionMatrix();
-                this.lerpSpeed = 1.0; // Instant follow
+                this.lerpSpeed = 1.0; 
                 this.rotationLerpSpeed = 1.0;
                 Object.values(this.game.playerManager.players).forEach(tank => tank.bigNameTag());
-                break;        
+                break;
         }
     }
 
@@ -260,17 +263,32 @@ export class CameraManager {
             this.hasReachedApex = false;
             this.apexPosition = null;
             this.apexProjectilePosition = null;
-            this.initialProjectileHeight = projectile.mesh ? projectile.mesh.position.y : null;
-            
-            // Reset camera position to be right behind projectile
+    
+            // Store the projectile's initial height for apex detection
             if (projectile.mesh) {
-                this.camera.position.copy(projectile.mesh.position).add(this.projectileOffset);
+                projectile.previousHeight = projectile.mesh.position.y;
+            }
+    
+            // Let's override the camera's pitch so it starts somewhat looking downward.
+            // For example, -Math.PI/4 is a 45° downward tilt.
+            this.pitch = -Math.PI / 4;
+            this.yaw = 0; // You can tweak yaw if you want to face a particular direction
+    
+            // Keep track of the projectile’s last position for forward vector calculation
+            this.lastProjectilePos.copy(
+                projectile.mesh ? projectile.mesh.position : new THREE.Vector3()
+            );
+    
+            // Optionally snap the camera to an offset behind the projectile right away
+            if (projectile.mesh) {
+                this.camera.position
+                    .copy(projectile.mesh.position)
+                    .add(this.projectileOffset); // e.g. {x:0, y:-50, z:10}
                 this.camera.lookAt(projectile.mesh.position);
             }
         }
     }
-
-
+    
     update() {
         switch (this.currentView) {
             case 'preGame':
@@ -319,78 +337,82 @@ export class CameraManager {
         this.targetLookAt.set(0, 0, 0);
     }
 
-updateProjectileView() {
-    if (!this.currentProjectile || !this.currentProjectile.mesh) return;
+    updateProjectileView() {
+        if (!this.currentProjectile || !this.currentProjectile.mesh) return;
 
-    const currentHeight = this.currentProjectile.mesh.position.y;
-    
-    // Check if we've reached the apex
-    if (!this.hasReachedApex) {
-        if (this.initialProjectileHeight === null) {
-            this.initialProjectileHeight = currentHeight;
+        const projMeshPos = this.currentProjectile.mesh.position;
+        const currentHeight = projMeshPos.y;
+
+        // Apex detection via height
+        if (!this.hasReachedApex) {
+            if (this.initialProjectileHeight === null) {
+                this.initialProjectileHeight = currentHeight;
+            }
+            // If current height is below the previous frame's height, 
+            // AND above initial height, that means we've passed apex
+            if (currentHeight < (this.currentProjectile.previousHeight || currentHeight) &&
+                currentHeight > this.initialProjectileHeight) {
+                this.hasReachedApex = true;
+                // Store camera's position as apex position
+                this.apexPosition = this.camera.position.clone();
+                // Store projectile position at apex
+                this.apexProjectilePosition = projMeshPos.clone();
+            }
+            // Update previous height
+            this.currentProjectile.previousHeight = currentHeight;
         }
-        
-        // We've reached apex if current height is less than previous height
-        // and we're above the initial height (to avoid triggering on launch)
-        if (currentHeight < this.currentProjectile.previousHeight && 
-            currentHeight > this.initialProjectileHeight) {
-            this.hasReachedApex = true;
-            // Store the current camera position as our fixed position
-            this.apexPosition = this.camera.position.clone();
-            // Also store the projectile position at apex for calculating offset
-            this.apexProjectilePosition = this.currentProjectile.mesh.position.clone();
-        }
-        
-        // Store current height for next frame comparison
-        this.currentProjectile.previousHeight = currentHeight;
-    }
 
-    // Get projectile's forward direction
-    const forward = this.currentProjectile.velocity.clone().normalize();
-    
-    if (!this.hasReachedApex) {
-        // Before apex: Follow normally
-        const up = new THREE.Vector3(0, 1, 0);
-        const right = new THREE.Vector3().crossVectors(forward, up).normalize();
-        const trueUp = new THREE.Vector3().crossVectors(right, forward).normalize();
+        // Approximate forward vector from last position
+        const forward = projMeshPos.clone().sub(this.lastProjectilePos).normalize();
+        this.lastProjectilePos.copy(projMeshPos);
 
-        const baseRotationMatrix = new THREE.Matrix4().makeBasis(right, trueUp, forward.multiplyScalar(-1));
-        const offsetMatrix = new THREE.Matrix4().makeRotationFromEuler(this.projectileRotationOffset);
-        const rotationMatrix = baseRotationMatrix.multiply(offsetMatrix);
-        
-        this.targetPosition.copy(this.currentProjectile.mesh.position)
-            .add(new THREE.Vector3(0, this.projectileOffset.y, 0))
-            .sub(forward.multiplyScalar(Math.abs(this.projectileOffset.z)));
+        if (!this.hasReachedApex) {
+            // Before apex: camera follows behind & above
+            const up = new THREE.Vector3(0, 1, 0);
+            const right = new THREE.Vector3().crossVectors(forward, up).normalize();
+            const trueUp = new THREE.Vector3().crossVectors(right, forward.clone().negate()).normalize();
             
-        this.targetRotation.setFromRotationMatrix(rotationMatrix);
-    } else {
-        // After apex: Keep camera position fixed where we detached
-        this.targetPosition.copy(this.apexPosition);
-        
-        // Start transitioning rotation towards looking straight down
-        const downwardRotation = new THREE.Euler(-Math.PI / 2, 0, 0);
-        const currentRotation = new THREE.Euler().setFromQuaternion(this.camera.quaternion);
-        
-        // Lerp each rotation component
-        this.targetRotation.x = THREE.MathUtils.lerp(currentRotation.x, downwardRotation.x, 0.05);
-        this.targetRotation.y = THREE.MathUtils.lerp(currentRotation.y, downwardRotation.y, 0.05);
-        this.targetRotation.z = THREE.MathUtils.lerp(currentRotation.z, downwardRotation.z, 0.05);
+            const baseRotationMatrix = new THREE.Matrix4().makeBasis(right, trueUp, forward.clone().negate());
+            const offsetMatrix = new THREE.Matrix4().makeRotationFromEuler(this.projectileRotationOffset);
+            const rotationMatrix = baseRotationMatrix.multiply(offsetMatrix);
+            
+            // Position: a bit behind the projectile
+            this.targetPosition.copy(projMeshPos)
+                .add(new THREE.Vector3(0, this.projectileOffset.y, 0))
+                .sub(forward.multiplyScalar(Math.abs(this.projectileOffset.z)));
+            
+            this.targetRotation.setFromRotationMatrix(rotationMatrix);
+            this.targetLookAt.copy(projMeshPos);
+        } else {
+            // After apex: keep camera where it was at apex, look downward
+            if (this.apexPosition) {
+                this.targetPosition.copy(this.apexPosition);
+            } else {
+                // fallback in case apexPosition is missing
+                this.targetPosition.copy(this.camera.position);
+            }
+
+            // Slowly rotate downward
+            const downwardRotation = new THREE.Euler(-Math.PI / 2, 0, 0);
+            const currentRotation = new THREE.Euler().setFromQuaternion(this.camera.quaternion);
+            
+            this.targetRotation.x = THREE.MathUtils.lerp(currentRotation.x, downwardRotation.x, 0.05);
+            this.targetRotation.y = THREE.MathUtils.lerp(currentRotation.y, downwardRotation.y, 0.05);
+            this.targetRotation.z = THREE.MathUtils.lerp(currentRotation.z, downwardRotation.z, 0.05);
+
+            this.targetLookAt.copy(projMeshPos);
+        }
     }
-    
-    // Update look target
-    this.targetLookAt.copy(this.currentProjectile.mesh.position);
-}
 
-
-updateThirdPersonView() {
+    updateThirdPersonView() {
         if (!this.target) return;
         const r = this.thirdPersonDistance;
         
         let pitch = this.pitch;
         let offset = new THREE.Vector3(
-             r * Math.cos(pitch) * Math.sin(this.yaw),
-             r * Math.sin(pitch) + this.thirdPersonHeight,
-             r * Math.cos(pitch) * Math.cos(this.yaw)
+            r * Math.cos(pitch) * Math.sin(this.yaw),
+            r * Math.sin(pitch) + this.thirdPersonHeight,
+            r * Math.cos(pitch) * Math.cos(this.yaw)
         );
         
         let candidatePos = this.target.position.clone().add(offset);
@@ -415,7 +437,7 @@ updateThirdPersonView() {
         this.targetPosition.copy(this.target.position).add(offset);
         this.targetLookAt.copy(this.target.position);
     }
-    
+
     updateOverheadView() {
         this.targetPosition.set(
             this.overheadCenter.x,
@@ -425,61 +447,30 @@ updateThirdPersonView() {
     }
 
     updateChaseView() {
-        this.game.projectiles.forEach((proj) => {
-            if (!this.chaseProjectiles.has(proj)) {
-                this.chaseProjectiles.set(proj, {
-                    lastPosition: new THREE.Vector3(),
-                    velocity: new THREE.Vector3()
-                });
-            }
-        });
+        // We no longer try to compute "avgVelocity".
+        // Instead, we just center the camera on the average position of all projectiles.
 
-        this.chaseProjectiles.forEach((record, proj) => {
-            if (!proj.isDestroyed) {
-                if (proj.mesh) {
-                    record.lastPosition.copy(proj.mesh.position);
-                } else if (proj.tempMesh) {
-                    record.lastPosition.copy(proj.tempMesh.position);
-                }
-                record.velocity.copy(proj.velocity);
-            }
-        });
+        const activeProjectiles = this.game.projectiles.filter(p => !p.isDestroyed && p.mesh);
+        if (activeProjectiles.length === 0) return;
 
-        const entries = Array.from(this.chaseProjectiles.values());
-        if (entries.length === 0) return;
-
+        // Find average position
         const center = new THREE.Vector3();
-        const avgVelocity = new THREE.Vector3();
+        for (const proj of activeProjectiles) {
+            center.add(proj.mesh.position);
+        }
+        center.divideScalar(activeProjectiles.length);
 
-        entries.forEach(({ lastPosition, velocity }) => {
-            center.add(lastPosition);
-            avgVelocity.add(velocity);
-        });
-
-        center.divideScalar(entries.length);
-        avgVelocity.divideScalar(entries.length);
-
-        const trajectoryPitch = Math.atan2(
-            avgVelocity.y,
-            Math.sqrt(avgVelocity.x * avgVelocity.x + avgVelocity.z * avgVelocity.z)
-        );
-        const minViewingAngle = Math.PI / 6;
-        const combinedPitch = Math.max(this.pitch, minViewingAngle);
-
-        const heightOffset = Math.abs(Math.sin(trajectoryPitch)) * this.chaseHeight;
-        const adjustedHeight = this.chaseHeight + heightOffset;
-
+        // We'll just place the camera at a fixed offset from this center,
+        // using 'yaw' + 'pitch' if you want manual control.
         const r = this.chaseDistance;
-        const x = r * Math.cos(combinedPitch) * Math.sin(this.yaw);
-        const y = r * Math.sin(combinedPitch) + adjustedHeight;
-        const z = r * Math.cos(combinedPitch) * Math.cos(this.yaw);
+        // We'll assume pitch is the user’s pitch or some default
+        const pitch = Math.max(this.pitch, Math.PI / 6); // minimum angle
+        const x = r * Math.cos(pitch) * Math.sin(this.yaw);
+        const y = r * Math.sin(pitch) + this.chaseHeight;
+        const z = r * Math.cos(pitch) * Math.cos(this.yaw);
 
         this.targetPosition.copy(center).add(new THREE.Vector3(x, y, z));
         this.targetLookAt.copy(center);
-    }
-
-    clearChaseProjectiles() {
-        this.chaseProjectiles.clear();
     }
 
     preventClipping() {

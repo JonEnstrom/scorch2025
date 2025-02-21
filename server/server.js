@@ -202,7 +202,7 @@ app.get('/games', async (req, res) => {
 // Create test games
 app.post('/create-test-games', async (req, res) => {
   const { numberOfGames = 5, playersPerGame = 8, theme = 'grassland' } = req.body;
-  const DELAY_BETWEEN_GAMES = 500; // 500ms = half second
+  const DELAY_BETWEEN_GAMES = 5000; // 500ms = half second
   
   // Create new test games with delay
   for (let i = 0; i < numberOfGames; i++) {

@@ -20,6 +20,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { DroneFeedShader } from './shaders/DroneFeedShader.js';
 import { notificationManager } from './NotificationManager';
+import { ProjectileTimelineManager } from './ProjectileTimelineManager.js';
 
 class FPSDisplay {
     constructor() {
@@ -64,6 +65,7 @@ export class Game extends EventEmitter {
         super(); // Initialize EventEmitter
         this.socket = socket;
         this.projectiles = [];
+        this.projectileMap = new Map();
         this.setupGameState();
         this.setupManagers();
     }
@@ -85,6 +87,7 @@ export class Game extends EventEmitter {
         this.sceneManager = new SceneManager(this);
         this.shopManager = new ShopManager(this.socket, 5000);
         this.playerManager = new PlayerManager(this);
+        this.timelineManager = new ProjectileTimelineManager(this);
         }
 
     init(gameData) {
@@ -161,6 +164,13 @@ export class Game extends EventEmitter {
         if (gameData.currentRound === 0) this.cameraManager.setView('preGame');
 
 
+    }
+
+    // Called when the server sends a complete timeline
+    handleFullProjectileTimeline(timelineData) {
+        
+        // Let the timeline manager handle it.
+        this.timelineManager.queueTimeline(timelineData);
     }
 
     isInPreGame() {
@@ -316,7 +326,6 @@ export class Game extends EventEmitter {
     }
 
     handleTurnUpdate(currentPlayerId) {
-        if (this.cameraManager) this.cameraManager.clearChaseProjectiles();
         this.playerManager.setCurrentPlayerId(currentPlayerId);
         const currentTank = this.playerManager.getCurrentPlayer();
         if (!currentTank || !currentTank.mesh) return;
@@ -338,18 +347,6 @@ export class Game extends EventEmitter {
         this.projectiles.push(projectile); 
         this.currentPlayerHasFired = true;
         
-        if (!data.weaponCode) { return; }
-        
-        // Update camera view based on weapon type
-        if (data.weaponCode.startsWith('RF01')) {
-            if (this.cameraManager.currentView !== 'projectile') {
-                this.cameraManager.setView('projectile');
-                this.cameraManager.setProjectileTarget(projectile);
-            }
-        } else {
-            // Set to projectile view and set the projectile as the target
-            this.cameraManager.setView('chase');
-        }
     }
     
     handleTerrainPatch(patch) {
@@ -375,7 +372,10 @@ export class Game extends EventEmitter {
         this.shieldManager.update();
         this.gpuParticleManager.update(deltaTime);
         this.playerManager.updatePlayers(deltaTime, this.cameraManager.camera);
-        this.updateProjectiles(deltaTime);
+        this.timelineManager.update(deltaTime);
+        for (const proj of this.projectiles) {
+            proj.updateVisual(deltaTime);
+        }
         this.updateTerrainShaders();
         this.updateSunPosition(deltaTime);
         this.terrainRenderer.updateReflections(this.renderer, this.scene, this.cameraManager.camera);

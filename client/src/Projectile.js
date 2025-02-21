@@ -1,3 +1,4 @@
+// ClientProjectile.js
 import * as THREE from 'three';
 import { ModelCache } from './ModelCache.js';
 import { TrailEffect } from './GpuTrails.js';
@@ -25,53 +26,59 @@ class ClientProjectile {
             isFinalProjectile
         } = projectileData;
 
-        this.craterSize = craterSize;
-        this.isFinalProjectile = isFinalProjectile;
         this.projectileId = projectileId;
         this.playerId = playerId;
-        this.isDestroyed = false;
         this.weaponId = weaponId;
         this.weaponCode = weaponCode;
-        this.direction = new THREE.Vector3(0,0,0);
-        
-        // Scene references
-        this.scene = scene;
-        this.gpuParticleManager = gpuParticleManager;
-        this.terrainRenderer = terrainRenderer;
-        
-        // Position and motion setup
-        this.position = new THREE.Vector3(startPos.x, startPos.y, startPos.z);
-        
-        // Acceleration and velocity parameters
-        this.maxSpeed = power * 1.0;  // Maximum speed the projectile can reach
-        this.currentSpeed = 0;        // Current speed of the projectile
-        this.acceleration = 305;      // Units per second²
-        this.velocity = new THREE.Vector3()
-            .copy(direction)
-            .normalize()
-            .multiplyScalar(this.currentSpeed);
-        this.moveDirection = new THREE.Vector3()
-            .copy(direction)
-            .normalize();
-        
-        this.gravity = -300;
 
-        // Visual properties
         this.projectileStyle = projectileStyle;
         this.projectileScale = projectileScale || 1;
         this.explosionType = explosionType || 'normal';
         this.explosionSize = explosionSize || 1;
+        this.craterSize = craterSize || 20;
+        this.isFinalProjectile = isFinalProjectile || false;
 
-        // Configuration based on projectileStyle
+        // Scene references
+        this.scene = scene;
+        this.gpuParticleManager = gpuParticleManager;
+        this.terrainRenderer = terrainRenderer;
+
+        // Start position
+        this.position = new THREE.Vector3(startPos.x, startPos.y, startPos.z);
+
+        // **Lerp** variables:
+        this.lerpPosition = this.position.clone();  // smoothly-updated position
+        this.lerpTarget = this.position.clone();    // target position from server
+
+        // Direction used for orientation
+        this.direction = new THREE.Vector3(direction.x, direction.y, direction.z).normalize();
+
+        this.isDestroyed = false;
+
+        // Visual/trail config
         this.configureProjectile();
-
-        // Setup visuals
-        if (TRAILS) this.trailEffect = new TrailEffect(gpuParticleManager);
         this.setupVisuals();
     }
 
+    setOrientation(direction) {
+        // direction is either a plain { x, y, z } object or a THREE.Vector3
+        const forward = new THREE.Vector3(direction.x, direction.y, direction.z).normalize();
+        const up = new THREE.Vector3(0, 1, 0);
 
-    // Configuration for different projectile styles
+        // Create a rotation matrix that makes the -Z axis point toward `forward`.
+        const matrix = new THREE.Matrix4();
+        matrix.lookAt(
+          new THREE.Vector3(0, 0, 0),  // eye
+          forward,                     // target
+          up
+        );
+      
+        const q = new THREE.Quaternion().setFromRotationMatrix(matrix);
+      
+        if (this.mesh) this.mesh.quaternion.copy(q);
+        if (this.tempMesh) this.tempMesh.quaternion.copy(q);
+    }
+
     configureProjectile() {
         const styles = {
             missile: {
@@ -85,7 +92,7 @@ class ClientProjectile {
                 rotation: {
                     type: 'velocity', // 'velocity' or 'constant'
                     rotationAxis: null,
-                    rotationSpeed: 0 // degrees per second, only for 'constant'
+                    rotationSpeed: 0
                 }
             },
             bomblet: {
@@ -99,10 +106,9 @@ class ClientProjectile {
                 rotation: {
                     type: 'constant',
                     rotationAxis: new THREE.Vector3(1, 1, 0).normalize(),
-                    rotationSpeed: 1800 // degrees per second
+                    rotationSpeed: 1800
                 }
             },
-            // Add more styles here as needed
             default: {
                 tempMeshColor: 0xff0000,
                 meshColor: 0xff0000,
@@ -119,24 +125,31 @@ class ClientProjectile {
             }
         };
 
-        // Assign configuration based on projectileStyle
         const config = styles[this.projectileStyle] || styles.default;
         this.tempMeshColor = config.tempMeshColor;
         this.meshColor = config.meshColor;
         this.trailConfig = {
             ...config.trailConfig,
-            position: this.position,
+            position: this.position,  // initial position
             trailId: `${this.projectileId}trail`
         };
         this.rotationConfig = config.rotation;
     }
 
     async setupVisuals() {
+        // Temporary sphere
         this.tempMesh = this.createTempMesh();
         this.tempMesh.position.copy(this.position);
         this.scene.add(this.tempMesh);
+
+        // Load 3D model (optional)
         await this.loadProjectileModel();
-        if (TRAILS) this.setupTrailEffect();
+
+        // Trails
+        if (TRAILS) {
+            this.trailEffect = new TrailEffect(this.gpuParticleManager);
+            this.trailEffect.createTrail(this.trailConfig);
+        }
     }
 
     createTempMesh() {
@@ -151,16 +164,6 @@ class ClientProjectile {
         return new THREE.Mesh(geometry, material);
     }
 
-    getTrailConfig() {
-        // Return the pre-configured trailConfig
-        return this.trailConfig;
-    }
-
-    setupTrailEffect() {
-        this.trailEffect.createTrail(this.getTrailConfig());
-
-    }
-
     async loadProjectileModel() {
         try {
             const modelPath = `./models/${this.projectileStyle}.glb`;
@@ -168,19 +171,19 @@ class ClientProjectile {
             this.mesh = loadedModel.clone();
             this.mesh.scale.setScalar(this.projectileScale);
             this.mesh.position.copy(this.position);
+
             this.mesh.traverse((child) => {
                 if (child.isMesh) {
                     child.castShadow = true;
-                    child.receiveShadow = true;  // Add this
+                    child.receiveShadow = true;
                     child.material = new THREE.MeshStandardMaterial({
                         color: this.meshColor,
                         metalness: 0.7,
-                        roughness: 0.3,
-                        shadowSide: THREE.FrontSide  // Add this
+                        roughness: 0.3
                     });
                 }
             });
-            
+
             this.scene.add(this.mesh);
             if (this.tempMesh) {
                 this.scene.remove(this.tempMesh);
@@ -193,114 +196,67 @@ class ClientProjectile {
         }
     }
 
-    update(deltaTime) {
+    /**
+     * Called by ProjectileTimelineManager or by the client
+     * to update the "target" position from the server.
+     */
+    setExactPosition(newPos) {
+        // Instead of snapping, we store it as our 'lerpTarget'
+        this.lerpTarget.set(newPos.x, newPos.y, newPos.z);
+    }
+
+    /**
+     * Smoother interpolation in updateVisual.
+     */
+    updateVisual(deltaTime) {
         if (this.isDestroyed) return;
-        
-        // Update speed with acceleration
-        if (this.currentSpeed < this.maxSpeed) {
-            this.currentSpeed = Math.min(
-                this.maxSpeed,
-                this.currentSpeed + (this.acceleration * deltaTime)
-            );
-            
-            // Update velocity vector with new speed
-            this.velocity.copy(this.moveDirection).multiplyScalar(this.currentSpeed);
-        }
 
-        // Base update logic
-        this.updatePosition(deltaTime);
-        this.updateMesh(deltaTime);
-        if (TRAILS) this.updateTrail();
+        // Lerp from current 'lerpPosition' to 'lerpTarget'
+        // e.g. factor = 10 * deltaTime means we try to "reach" the target in ~0.1s
+        const lerpFactor = 10 * deltaTime;
+        this.lerpPosition.lerp(this.lerpTarget, lerpFactor);
 
-        // Collision check
-        if ((this.terrainRenderer.getHeightAtPosition(this.position.x, this.position.z) > this.position.y) ||
-            (this.terrainRenderer.currentTheme === 'arctic' && this.position.y < 5)) {
-            this.terrainRenderer.scorchSystem.applyScorch(this.position, this.explosionSize * 25, 0.2);
-            this.terrainRenderer.queueTerrainModification(this.position.x, this.position.z, this.craterSize, 'crater');
-
-            const explosionEffect = new GPUExplosionEffect(this.gpuParticleManager);
-            explosionEffect.createBasicExplosion({
-                position: this.position,
-                projectileId: this.projectileId, 
-                explosionSize: this.explosionSize || 1,
-                explosionType: this.explosionType || 'normal'
-            });
-            if (this.isFinalProjectile) this.terrainRenderer.updateNormals();
-            this.destroy();
-        }
-    }
-
-    updatePosition(deltaTime) {
-        // Update velocity due to gravity
-        this.velocity.y += this.gravity * deltaTime;
-        
-        // Update position based on velocity
-        this.position.x += this.velocity.x * deltaTime;
-        this.position.y += this.velocity.y * deltaTime;
-        this.position.z += this.velocity.z * deltaTime;
-    }
-
-    updateMesh(deltaTime) {
+        // Update the actual mesh to the 'lerpPosition'
         const activeMesh = this.mesh || this.tempMesh;
         if (activeMesh) {
-            activeMesh.position.copy(this.position);
-            this.updateMeshRotation(activeMesh, deltaTime);
-        }
-    }
+            activeMesh.position.copy(this.lerpPosition);
 
-    updateMeshRotation(mesh, deltaTime) {
-        if (this.rotationConfig.type === 'velocity') {
-            if (this.velocity.lengthSq() > 0.001) {
-                const targetQuaternion = new THREE.Quaternion();
-                const up = new THREE.Vector3(0, 1, 0);
-                const matrix = new THREE.Matrix4();
-                
-                // Get the forward direction from velocity
-                const forward = this.velocity.clone().normalize();
-                
-                matrix.lookAt(
-                    new THREE.Vector3(0, 0, 0),
-                    forward,
-                    up
-                );
-                
-                targetQuaternion.setFromRotationMatrix(matrix);
-                mesh.quaternion.copy(targetQuaternion);
-                
-                // Update direction to match the mesh's forward direction
-                this.direction.set(0, 0, 1).applyQuaternion(mesh.quaternion);
+            // If rotation type is 'constant', we spin it
+            if (this.rotationConfig.type === 'constant') {
+                const rotationAmount = THREE.MathUtils.degToRad(this.rotationConfig.rotationSpeed) * deltaTime;
+                activeMesh.rotateOnAxis(this.rotationConfig.rotationAxis, rotationAmount);
             }
-        } else if (this.rotationConfig.type === 'constant') {
-            const rotationAmount = THREE.MathUtils.degToRad(this.rotationConfig.rotationSpeed) * deltaTime;
-            mesh.rotateOnAxis(this.rotationConfig.rotationAxis, rotationAmount);
-            
-            // For constant rotation, update direction based on mesh rotation
-            this.direction.set(0, 0, 1).applyQuaternion(mesh.quaternion);
+            // If rotation type is 'velocity', you might do setOrientation(this.direction)
+            // if you have an updated direction from the timeline.
+        }
+
+        // For convenience, also keep this.position in sync (if other code references it)
+        this.position.copy(this.lerpPosition);
+
+        // Update trails
+        if (TRAILS && this.trailEffect) {
+            this.trailEffect.updatePosition(this.trailConfig.trailId, this.position);
+            this.trailEffect.updateDirection(this.trailConfig.trailId, this.direction);
         }
     }
 
-    updateTrail() {
-        this.trailEffect.updatePosition(
-            this.trailConfig.trailId,
-            this.position
-        );
-        this.trailEffect.updatePosition(
-            this.trailConfig.trailId + 'fire',
-            this.position
-        );
+    triggerExplosion(impactEvent) {
+        const explosionEffect = new GPUExplosionEffect(this.gpuParticleManager);
+        explosionEffect.createBasicExplosion({
+            position: this.position,
+            projectileId: this.projectileId, 
+            explosionSize: this.explosionSize,
+            explosionType: this.explosionType
+        });
 
-        this.trailEffect.updateDirection(
-            this.trailConfig.trailId,
-            this.direction
-        );
-        this.trailEffect.updateDirection(
-            this.trailConfig.trailId + 'fire',
-            this.direction
-        );
+        // Deform terrain (client-side effect)
+        this.terrainRenderer.scorchSystem.applyScorch(this.position, this.explosionSize * 25, 0.2);
+        this.terrainRenderer.queueTerrainModification(this.position.x, this.position.z, this.craterSize, 'crater');
+        if (this.isFinalProjectile) {
+            this.terrainRenderer.updateNormals();
+        }
     }
 
-        
-    
     destroy() {
         if (this.isDestroyed) return;
         this.isDestroyed = true;
@@ -329,12 +285,14 @@ class ClientProjectile {
             this.tempMesh = null; 
         }
 
-        //this.gpuParticleManager.removeEmitter(this.projectileId);
-        if (TRAILS) this.trailEffect.stopTrail(this.trailConfig.trailId);
+        // Stop trails
+        if (TRAILS && this.trailEffect) {
+            this.trailEffect.stopTrail(this.trailConfig.trailId);
+        }
 
         this.scene = null;
-        this.particleManager = null;
         this.gpuParticleManager = null;
+        this.terrainRenderer = null;
     }
 }
 

@@ -2,69 +2,107 @@ import * as THREE from 'three';
 import { v4 as uuidv4 } from 'uuid';
 
 export default class MultiShotWeapon {
-    constructor(projectileManager) {
-        this.projectileCount = 8;
-        this.spreadAngle = 0.15;
-        this.projectileManager = projectileManager;
-        this.isSequentialFiring = false;
-        this.fireInterval = 500;
-        this.id = uuidv4();
-        this.weaponCode = 'MS01';
+  constructor(projectileManager) {
+    this.projectileCount = 8;    // total shots
+    this.spreadAngle = 0.15;     // random angle
+    this.fireInterval = 500;     // ms between shots
+    this.projectileManager = projectileManager;
+    this.id = uuidv4();
+    this.weaponCode = 'MS01';
+  }
+
+  /**
+   * Fire method under the pre-calculated system:
+   * 1) We have multiple projectiles (shots), each with a time offset.
+   * 2) We add them all to the same timeline using simulateSubProjectile(...).
+   * 3) The last shot is final => ends the turn.
+   * 4) Then we broadcast the combined timeline and schedule turn end.
+   */
+  fire(tank, playerId, gameCore) {
+    // We'll collect everything in a single timeline array
+    const timeline = [];
+
+    // For each shot, we create one projectile, 
+    // offset in time by i * fireInterval
+    for (let i = 0; i < this.projectileCount; i++) {
+      const spawnTime = i * this.fireInterval;
+
+      const baseDirection = tank.getFireDirection();
+      const spawnPos = tank.getBarrelTip();
+      const power = tank.power;
+
+      // Slight random spread
+      const randomSpread = new THREE.Vector3(
+        (Math.random() - 0.5) * this.spreadAngle,
+        (Math.random() - 0.5) * this.spreadAngle,
+        (Math.random() - 0.5) * this.spreadAngle
+      );
+
+      const direction = baseDirection.clone().add(randomSpread).normalize();
+
+      // Mark only the last shot as final
+      const isFinal = (i === this.projectileCount - 1);
+
+      const projectileData = {
+        startPos: spawnPos.clone(),
+        direction,
+        power,
+        isFinalProjectile: isFinal,
+        projectileStyle: 'missile',
+        craterSize: 30,
+        baseDamage: 20,
+        explosionSize: 1,
+
+        // If you want the default collision logic,
+        // you can keep weaponId/weaponCode here or omit:
+        weaponId: this.id,
+        weaponCode: this.weaponCode
+      };
+
+      // Add each shot to the timeline with simulateSubProjectile
+      this.projectileManager.simulateSubProjectile(
+        projectileData,
+        spawnTime,   // spawn offset
+        timeline
+      );
     }
 
-    /**
-     * Called when the tank fires this weapon.
-     * @param {Object} tank - The tank or player data.
-     * @param {string} playerId - The ID of the player firing.
-     */
-    fire(tank, playerId) {
-        // Prevent firing if already in progress
-        if (this.isSequentialFiring) return;
-        
-        this.isSequentialFiring = true;
-        let shotsLeft = this.projectileCount;
-        
-        const fireNextShot = () => {
-            // Get updated position and direction for each shot
-            const baseDirection = tank.getFireDirection();
-            const spawnPos = tank.getBarrelTip();
-            const power = tank.power;
+    // Once we've inserted all shots, 
+    // we broadcast the timeline and schedule turn
+    this._broadcastAndScheduleTurn(gameCore, timeline);
+  }
 
-            // Add some random spread
-            const randomSpread = new THREE.Vector3(
-                (Math.random() - 0.5) * this.spreadAngle,
-                (Math.random() - 0.5) * this.spreadAngle,
-                (Math.random() - 0.5) * this.spreadAngle
-            );
+  /**
+   * Broadcast the final timeline, then schedule turn 
+   * after the last event time + gameCore.turnChangeDelay.
+   */
+  _broadcastAndScheduleTurn(gameCore, timeline) {
+    // Send to clients
+    this.projectileManager.io
+      .to(this.projectileManager.gameId)
+      .emit('fullProjectileTimeline', timeline);
+      this.projectileManager.scheduleTimeline(timeline, Date.now(), gameCore);
 
-            const direction = baseDirection.clone().add(randomSpread).normalize();
 
-            // Create single projectile data
-            const projectileData = [{
-                startPos: spawnPos.clone(),
-                direction,
-                power,
-                isFinalProjectile: (shotsLeft === 1), // Last shot flag
-                projectileStyle: 'missile',
-                craterSize: 30,
-                baseDamage: 20,
-                explosionSize: 1
-            }];
+    // Find max event time
+    const lastEventTime = timeline.length
+      ? Math.max(...timeline.map(e => e.time))
+      : 0;
 
-            // Spawn single projectile
-            this.projectileManager.spawnProjectiles(playerId, projectileData, this.id, this.weaponCode);
+    const totalDelay = lastEventTime + gameCore.turnChangeDelay;
 
-            shotsLeft--;
+    setTimeout(async () => {
+      if (!(await gameCore.roundManager.checkRoundOver())) {
+        gameCore.playerManager.advanceTurn();
+        gameCore.playerManager.currentPlayer =
+          gameCore.playerManager.turnManager.getCurrentPlayerId();
+        gameCore.playerManager.currentPlayerHasFired = false;
+      }
+    }, totalDelay);
+  }
 
-            // Schedule next shot if there are shots remaining
-            if (shotsLeft > 0) {
-                setTimeout(fireNextShot, this.fireInterval);
-            } else {
-                this.isSequentialFiring = false;
-            }
-        };
-
-        // Fire first shot immediately
-        fireNextShot();
-    }
+  destroy() {
+    // If you register an onImpact handler in the future, remove it here:
+    this.projectileManager.weaponHandlers.delete(this.id);
+  }
 }

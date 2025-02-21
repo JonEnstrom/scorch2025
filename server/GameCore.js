@@ -1,6 +1,5 @@
 // server/GameCore.js
 import { GameNetworking } from './GameNetworking.js';
-import { ProjectileManager } from './ProjectileManager.js';
 import PlayerManager from './PlayerManager.js';
 import TerrainManager from './TerrainManager.js';
 import ItemManager from './ItemManager.js';
@@ -11,6 +10,7 @@ import HelicopterManager from './HelicopterManager.js';
 import ArmorShieldManager from './ArmorShieldManager.js';
 import CPUPlayer from './CPUPlayer.js';
 import { checkAllPlayersReady, startReadyCountdown, cancelReadyCountdown } from './ReadyCheck.js';
+import PrecalculatedProjectileManager from './PrecalculatedProjectileManager.js';
 
 export default class GameCore {
   constructor(
@@ -39,8 +39,13 @@ export default class GameCore {
     this.itemManager = new ItemManager();
     this.playerManager = new PlayerManager(this.networking.io, this.terrainManager, this.itemManager, gameId, this);
     this.helicopterManager = new HelicopterManager(this.networking.io, this.gameId, this.terrainManager);
-    this.projectileManager = new ProjectileManager(this.networking.io, this.terrainManager, gameId, this.helicopterManager);
-    this.roundManager = new RoundManager(this, totalRounds);
+    this.projectileManager = new PrecalculatedProjectileManager(
+      this.networking.io,
+      this.gameId,
+      this.terrainManager,
+      this.helicopterManager
+    );
+        this.roundManager = new RoundManager(this, totalRounds);
 
     // Timer and state management
     this.readyCheckTimer = null;
@@ -51,7 +56,6 @@ export default class GameCore {
     this.emptyGameTimer = null;
     this.EMPTY_GAME_TIMEOUT = 60000;
     this.lastPlayerLeftTime = null;
-    this.gameLoopTimer = setInterval(this.gameLoop.bind(this), this.updateInterval);
 
     // Initialize game
     this.projectileManager.setImpactHandler((impactEvent) => {
@@ -431,7 +435,8 @@ export default class GameCore {
     if (this._isDestroyed) {
       return;
     }
-
+  
+    // If this wasn't a helicopter hit, handle terrain & area damage.
     if (!impactEvent.isHelicopterHit) {
       const patch = this.terrainManager.modifyTerrain(
         impactEvent.position.x,
@@ -439,63 +444,43 @@ export default class GameCore {
         impactEvent.craterSize,
         'crater'
       );
-
+  
       const allPlayers = this.playerManager.getPlayersObject();
       for (const [userId, player] of Object.entries(allPlayers)) {
         if (!player.isAlive) continue;
-
+  
         const playerPos = player.getPosition();
         const dx = playerPos.x - impactEvent.position.x;
         const dz = playerPos.z - impactEvent.position.z;
         const distance = Math.sqrt(dx * dx + dz * dz);
-
+  
+        // Area-of-effect damage
         if (distance < impactEvent.aoeSize) {
           const falloffPercent = (distance / impactEvent.aoeSize) * 0.5;
           const damageMultiplier = 1 - falloffPercent;
           const damage = Math.round(impactEvent.damage * damageMultiplier);
-
+  
+          // Changed from this.ArmorShieldManager to ArmorShieldManager
           const damageResult = ArmorShieldManager.applyDamage(player, damage);
-
+  
           this.networking.io.to(this.gameId).emit('playerDamaged', {
             id: userId,
             damage: damage,
             damageDistribution: damageResult,
             currentHealth: player.getHealth()
           });
-
+  
           if (player.getHealth() <= 0) {
             player.isAlive = false;
             this.networking.io.to(this.gameId).emit('playerDefeated', { id: userId });
           }
-
           this.networking.io.to(this.gameId).emit('playerListUpdated', this.playerManager.getAllPlayers());
         }
       }
-
+  
+      // Re-adjust any players that might be standing where terrain changed.
       this.playerManager.adjustPositionsToTerrain();
     }
-
-    if (impactEvent.isFinalProjectile && !this.isProcessingTurnChange) {
-      this.isProcessingTurnChange = true;
-      this.networking.io.to(this.gameId).emit('turnChangePending');
-      await new Promise((resolve) => setTimeout(resolve, this.turnChangeDelay));
-      this.isProcessingTurnChange = false;
-      if (!await this.roundManager.checkRoundOver()) {
-        this.playerManager.advanceTurn();
-        this.playerManager.currentPlayer = this.playerManager.turnManager.getCurrentPlayerId();
-        this.playerManager.currentPlayerHasFired = false;
-      }
-    }
-  }
-
-  async gameLoop() {
-    if (this._isDestroyed || !this.projectileManager) {
-      return;
-    }
-    const currentTime = Date.now();
-    const deltaTime = (currentTime - this.lastUpdateTime) / 1000;
-    this.lastUpdateTime = currentTime;
-    this.projectileManager.update(deltaTime, this.terrainManager, this.playerManager.getPlayersObject());
   }
 
   isFull() {
@@ -540,6 +525,7 @@ export default class GameCore {
       this.emptyGameTimer = null;
     }
   }
+  
 
   getLobbyInfo() {
     const allPlayers = Object.values(this.playerManager.players)
@@ -572,6 +558,8 @@ export default class GameCore {
       totalRounds: this.roundManager.totalRounds
     };
   }
+
+  
   
   closeRemainingSlots() {
     const currentPlayerCount = Object.values(this.playerManager.players)
@@ -593,7 +581,6 @@ export default class GameCore {
     if (this._isDestroyed) return;
     this._isDestroyed = true;
 
-    clearInterval(this.gameLoopTimer);
     if (this.playerManager) {
       this.playerManager.stopTurnTimer();
     }
@@ -619,7 +606,6 @@ export default class GameCore {
     }
 
     // Clean up managers
-    this.projectileManager?.destroy();
     this.playerManager?.destroy();
     this.terrainManager?.destroy();
     this.itemManager?.destroy();
@@ -631,7 +617,6 @@ export default class GameCore {
     this.lastPlayerLeftTime = null;
 
     // Null out references
-    this.gameLoopTimer = null;
     this.projectileManager = null;
     this.playerManager = null;
     this.terrainManager = null;

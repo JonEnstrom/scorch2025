@@ -143,11 +143,8 @@ const setupTurnEvents = () => {
 
 const setupCombatEvents = () => {
     const projectileEvents = {
-        'projectileFired': (data) => {
-            game.handleProjectileFired(data);
-        },
-        'projectileUpdates': (projectiles) => {
-            game.updateProjectiles(projectiles);
+        'fullProjectileTimeline': (timelineData) => {
+            game.handleFullProjectileTimeline(timelineData);
         },
         'projectileImpact': (impactData) => {
             game.handleProjectileImpact(impactData);

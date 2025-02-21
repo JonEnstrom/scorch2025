@@ -1,132 +1,139 @@
-import * as THREE from 'three';
+// AirStrikeWeapon.js
 import { v4 as uuidv4 } from 'uuid';
+import * as THREE from 'three';
 
 export default class AirStrikeWeapon {
-    constructor(projectileManager) {
-        this.projectileManager = projectileManager;
-        this.id = uuidv4();
-        this.weaponCode = 'RF01';
-        // Maximum number of bombs to drop
-        this.strikeCount = 40;
+  constructor(projectileManager) {
+    this.projectileManager = projectileManager;
+    this.id = uuidv4();
+    this.weaponCode = 'RF01';
 
-        // Time in ms between each bomb drop
-        this.strikeDelay = 100;
+    // Set your config
+    this.strikeCount = 40;
+    this.strikeDelay = 100;     // ms between bombs
+    this.initialDelay = 1000;   // ms before first bomb
+    this.altitude = 0;          // how high from carrier
+    this.spreadAngle = Math.PI / 3; // random horizontal spread ±30°
 
-        // How high bombs drop from (above the carrier projectile)
-        this.altitude = 0;
+    // Register the weapon logic
+    projectileManager.registerWeaponHandler(
+      this.id,
+      (impactEvent, timeline, manager) => this.handleImpact(impactEvent, timeline, manager)
+    );
+  }
 
-        // Maximum angle deviation for bomb direction (in radians)
-        this.spreadAngle = Math.PI / 3; // 60 degrees total spread (±30°)
-
-        // Initial delay before starting to drop bomblets (in ms)
-        this.initialDelay = 1000; // 1 second
-
-        // Internal state to keep track of our carrier and bomb-dropping interval.
-        this.carrierId = null;
-        this.dropInterval = null;
-        this.bombsRemaining = this.strikeCount;
-
-        // Register an impact handler that will stop the bomb drops when the carrier impacts.
-        // (Assumes impactData contains a projectileId property.)
-        this.projectileManager.registerWeaponHandler(this.id, (impactData) => {
-            if (impactData.projectileId === this.carrierId) {
-                // Carrier projectile has impacted: stop further bomb drops.
-                if (this.dropInterval) {
-                    clearInterval(this.dropInterval);
-                    this.dropInterval = null;
-                }
-            }
-        });
-    }
-
-    /**
-     * Called when the tank fires this weapon.
-     * @param {Object} tank - The tank or player data.
-     * @param {string} playerId - The ID of the player firing.
-     */
-    fire(tank, playerId) {
-        // 1) Spawn the "carrier" projectile from the tank's barrel tip.
-        const baseDirection = tank.getFireDirection();
-        const spawnPos = tank.getBarrelTip();
-        const power = tank.power;
-
-        const carrierData = [{
-            startPos: spawnPos.clone(),
-            direction: baseDirection.clone(),
-            power,
-            isFinalProjectile: true, // Indicates this is the carrier.
-            projectileStyle: 'missile',
-            projectileScale: 4,
-        }];
-
-        const carrierIds = this.projectileManager.spawnProjectiles(playerId, carrierData, this.id, this.weaponCode);
-        if (!carrierIds || carrierIds.length === 0) {
-            console.warn('Failed to spawn carrier projectile for AirStrikeWeapon.');
-            return;
+  fire(tank, playerId, gameCore) {
+    this.baseDirection = tank.getFireDirection();
+    const spawnPos = tank.getBarrelTip();
+  
+    const carrierData = [{
+      startPos: spawnPos.clone(),
+      direction: this.baseDirection.clone(),
+      power: tank.power,
+      isFinalProjectile: true,
+      projectileStyle: 'missile',
+      projectileScale: 4,
+      baseDamage: 0 // The carrier itself can do minimal damage
+    }];
+  
+    // 1) Simulate the carrier
+    const timeline = this.projectileManager.simulateProjectiles(
+      playerId,
+      carrierData,
+      this.id,
+      this.weaponCode
+    );
+  
+    // 2) Insert bombs as sub-projectiles (as you had before).
+    const carrierId = (timeline.find(
+      ev => ev.type === 'projectileSpawn' && ev.weaponId === this.id
+    )?.projectileId) || null;
+  
+    if (!carrierId) {
+      console.warn('No carrier found for AirStrikeWeapon');
+    } else {
+      let bombsRemaining = this.strikeCount;
+      let nextBombTime = this.initialDelay;
+  
+      while (bombsRemaining > 0) {
+        const relevantEvents = timeline.filter(ev =>
+          ev.projectileId === carrierId && ev.type === 'projectileMove' && ev.time <= nextBombTime
+        );
+  
+        if (!relevantEvents.length) {
+          // Means the carrier impacted or no data
+          break;
         }
-
-        // Save the carrier projectile's id so that we can later identify its impact.
-        this.carrierId = carrierIds[0];
-        this.bombsRemaining = this.strikeCount;
-
-        // Start a timer that will begin dropping bombs after the initial delay.
-        setTimeout(() => {
-            this.dropInterval = setInterval(() => {
-                // Stop dropping bombs if we have dropped them all.
-                if (this.bombsRemaining <= 0) {
-                    clearInterval(this.dropInterval);
-                    this.dropInterval = null;
-                    return;
-                }
-
-                // Get the current position of the carrier projectile.
-                // (We still use this lookup so that bombs drop from its current location.)
-                const carrierProjectile = this.projectileManager.getProjectileById(this.carrierId);
-                if (!carrierProjectile) {
-                    // Even if the carrier isn’t found, we rely on the impact event to stop dropping bombs.
-                    return;
-                }
-                const carrierPos = carrierProjectile.position.clone();
-
-                // Calculate the bomb spawn position (above the carrier).
-                const bombSpawnPos = carrierPos.clone();
-                bombSpawnPos.y += this.altitude;
-
-                // Create a bomb direction based on the carrier's base direction,
-                // then add a random horizontal deviation.
-                const bombDirection = baseDirection.clone();
-                const horizontalDeviation = (Math.random() - 0.5) * this.spreadAngle;
-                const rotationMatrix = new THREE.Matrix4();
-                rotationMatrix.makeRotationY(horizontalDeviation);
-                bombDirection.applyMatrix4(rotationMatrix);
-
-                const bombData = [{
-                    startPos: bombSpawnPos,
-                    direction: bombDirection,
-                    power: 100, // Bomb power can be fixed or calculated as needed.
-                    isFinalProjectile: false,
-                    explosionSize: 3.0,
-                    projectileStyle: 'bomblet',
-                    craterSize: 75,
-                    aoeSize: 150,
-                }];
-
-                // Spawn a bomb.
-                this.projectileManager.spawnProjectiles(playerId, bombData, this.id, this.weaponCode + '_BOMBLET');
-                this.bombsRemaining--;
-            }, this.strikeDelay);
-        }, this.initialDelay);
+  
+        const lastMoveEvent = relevantEvents[relevantEvents.length - 1];
+        const carrierPos = lastMoveEvent.position;
+        const bombSpawnPos = new THREE.Vector3(
+          carrierPos.x,
+          carrierPos.y + this.altitude,
+          carrierPos.z
+        );
+  
+        // Random horizontal deviation
+        const bombDir = this.baseDirection.clone();
+        const horizontalDeviation = (Math.random() - 0.5) * this.spreadAngle;
+        bombDir.applyAxisAngle(new THREE.Vector3(0, 1, 0), horizontalDeviation);
+  
+        const bombData = {
+          playerId,
+          weaponId: this.id,
+          weaponCode: this.weaponCode + '_BOMBLET',
+          startPos: bombSpawnPos,
+          direction: bombDir,
+          power: 100,
+          isFinalProjectile: false, // bombs themselves are not final
+          explosionSize: 3.0,
+          projectileStyle: 'bomblet',
+          craterSize: 75,
+          aoeSize: 150,
+          baseDamage: 50
+        };
+  
+        this.projectileManager.simulateSubProjectile(
+          bombData,
+          nextBombTime,
+          timeline
+        );
+  
+        bombsRemaining--;
+        nextBombTime += this.strikeDelay;
+      }
     }
+  
+    // 3) Broadcast the combined timeline (carrier + bombs) to clients
+    this.projectileManager.io
+      .to(this.projectileManager.gameId)
+      .emit('fullProjectileTimeline', timeline);
+      this.projectileManager.scheduleTimeline(timeline, Date.now(), gameCore);
 
-    /**
-     * Cleanup: clear timers and remove the impact handler registration.
-     */
-    destroy() {
-        if (this.dropInterval) {
-            clearInterval(this.dropInterval);
-            this.dropInterval = null;
-        }
-        // Remove the impact handler (if your projectileManager stores weaponHandlers in a Map)
-        this.projectileManager.weaponHandlers.delete(this.id);
-    }
+  
+    // 4) Find the last event in the entire timeline and schedule turn change
+    const finalEventTime = timeline.length
+      ? Math.max(...timeline.map(ev => ev.time))
+      : 0;
+    const totalDelay = finalEventTime + gameCore.turnChangeDelay;
+  
+    setTimeout(async () => {
+      if (!(await gameCore.roundManager.checkRoundOver())) {
+        gameCore.playerManager.advanceTurn();
+        gameCore.playerManager.currentPlayer =
+          gameCore.playerManager.turnManager.getCurrentPlayerId();
+        gameCore.playerManager.currentPlayerHasFired = false;
+      }
+    }, totalDelay);
+  }
+
+  handleImpact(impactEvent, timeline, manager) {
+    // If the "carrier" projectile impacted, we do nothing special here,
+    // since we handled the bombs by scanning the timeline. 
+    // Or you could do some final effect, if you want.
+  }
+
+  destroy() {
+    this.projectileManager.weaponHandlers.delete(this.id);
+  }
 }

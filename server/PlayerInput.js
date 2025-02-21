@@ -1,3 +1,5 @@
+// processInput.js
+
 import MultiShotWeapon from './weapons/MultiShotWeapon.js';
 import VolleyWeapon from './weapons/VolleyWeapon.js';
 import AirstrikeWeapon from './weapons/AirstrikeWeapon.js';
@@ -7,7 +9,7 @@ import { BouncingBettyWeapon } from './weapons/BouncingBetty.js';
 import BasicWeapon from './weapons/BasicWeapon.js';
 import { BouncingRabbitWeapon } from './weapons/BouncingRabbit.js';
 import ArmorShieldManager from './ArmorShieldManager.js';
-    
+
 /**
  * Process incoming input from a player (movement, firing, using an item, etc.).
  * @param {string} playerId
@@ -21,7 +23,7 @@ export function processInput(playerId, input, gameInstance) {
     if (gameInstance.gameState !== 'ROUND_IN_PROGRESS') {
         return; 
     }
-    // Only process if it's gameInstance player's turn and they haven't fired
+    // Only process if it's the current player's turn and they haven't fired
     if (
         playerId !== gameInstance.playerManager.turnManager.getCurrentPlayerId() ||
         gameInstance.playerManager.currentPlayerHasFired
@@ -40,6 +42,7 @@ export function processInput(playerId, input, gameInstance) {
             tank.setTurretYaw(input.delta);
             gameInstance.playerManager.broadcastPlayerUpdate(playerId);
             break;
+
         case 'setTurretYaw':
             tank.newTurretYaw(input.value);
             gameInstance.playerManager.broadcastPlayerUpdate(playerId);
@@ -54,7 +57,7 @@ export function processInput(playerId, input, gameInstance) {
             tank.setTurretPitch(input.value);
             gameInstance.playerManager.broadcastPlayerUpdate(playerId);
             break;
-                    
+
         case 'changePower':
             tank.adjustPower(input.delta);
             gameInstance.playerManager.broadcastPlayerUpdate(playerId);
@@ -64,26 +67,27 @@ export function processInput(playerId, input, gameInstance) {
             tank.setPower(input.value);
             gameInstance.playerManager.broadcastPlayerUpdate(playerId);
             break;
-        
-        case 'fire':
+
+        case 'fire': {
             gameInstance.playerManager.stopTurnTimer();
+
             const weaponCode = input.weaponCode;
             if (!weaponCode) {
                 gameInstance.io.to(playerId).emit('errorMessage', 'No weapon specified.');
                 return;
             }
-        
-            // Get the full item data from player's inventory
+
+            // Check player inventory
             const inventoryEntry = tank.getInventory()[weaponCode];
             if (!inventoryEntry || inventoryEntry.quantity <= 0) {
                 gameInstance.io.to(playerId).emit('errorMessage', 'You don\'t have any of that weapon left!');
                 return;
             }
-        
-            // Remove one instance of the weapon
+
+            // Remove one usage from inventory
             tank.removeItem(weaponCode, 1);
-        
-            // Create the appropriate weapon instance based on the item code
+
+            // Instantiate the correct weapon
             let weaponInstance;
             switch (weaponCode) {
                 case 'CW01': // ClusterWeapon
@@ -101,100 +105,111 @@ export function processInput(playerId, input, gameInstance) {
                 case 'MM01': // Mountain Merc
                     weaponInstance = new MountainMercWeapon(gameInstance.projectileManager);
                     break;
-                case 'RF01': // AirstrikeWeapon
+                case 'RF01': // Airstrike
                     weaponInstance = new AirstrikeWeapon(gameInstance.projectileManager);
                     break;
                 case 'BW01': // BasicWeapon
                     weaponInstance = new BasicWeapon(gameInstance.projectileManager);
                     break;
-                case 'MS01': // Multishot Weapon
+                case 'MS01': // MultiShot
                     weaponInstance = new MultiShotWeapon(gameInstance.projectileManager);
                     break;
                 default:
                     gameInstance.io.to(playerId).emit('errorMessage', `Unknown weapon code: ${weaponCode}`);
                     return;
-            }                
-            gameInstance.playerManager.currentPlayerHasFired = true;
-            weaponInstance.fire(tank, playerId);
-            break;
+            }
 
-        case 'use':
-            // Handle a player "using" an item (like armor, consumables, or misc items)
+            // Mark that the current player has fired
+            gameInstance.playerManager.currentPlayerHasFired = true;
+
+            // --------------  NEW: Get timeline and schedule it  --------------
+            // Fire the weapon, get its timeline of projectile events
+            const timelineEvents = weaponInstance.fire(tank, playerId, gameInstance);
+            if (Array.isArray(timelineEvents) && timelineEvents.length > 0) {
+                // Schedule these events to occur at the correct times
+                gameInstance.scheduleProjectileEvents(timelineEvents);
+            }
+            // -----------------------------------------------------------------
+
+            break;
+        }
+
+        case 'use': {
             const itemCode = input.itemCode;
             if (!itemCode) {
                 gameInstance.io.to(playerId).emit('errorMessage', 'No item specified.');
                 return;
             }
-            
-            // Get the item from the player's inventory
+
             const itemEntry = tank.getInventory()[itemCode];
             if (!itemEntry || itemEntry.quantity <= 0) {
                 gameInstance.io.to(playerId).emit('errorMessage', 'You don\'t have any of that item left!');
                 return;
             }
-            
+
             // Remove one instance of the item
             tank.removeItem(itemCode, 1);
-            
-            // Process the item based on its code
+
+            // Process the item
             switch (itemCode) {
                 // -------------- ARMOR ---------------
                 case 'LA01': // Light Armor
                 {
-                  const armorValue = 100; // using 100 for now
-                  ArmorShieldManager.addArmor(tank, armorValue);
-                  gameInstance.io.in(gameInstance.gameId).emit('armorAdded', {
-                    playerId,
-                    amount: armorValue,
-                    totalArmor: tank.armor
-                  });
-                  gameInstance.io.in(gameInstance.gameId).emit('playerListUpdated', gameInstance.playerManager.getAllPlayers());
+                    const armorValue = 100;
+                    ArmorShieldManager.addArmor(tank, armorValue);
+                    gameInstance.io.in(gameInstance.gameId).emit('armorAdded', {
+                        playerId,
+                        amount: armorValue,
+                        totalArmor: tank.armor
+                    });
+                    gameInstance.io.in(gameInstance.gameId).emit('playerListUpdated', gameInstance.playerManager.getAllPlayers());
                 }
                 break;
                 case 'HA02': // Heavy Armor
                 {
-                  const armorValue = 100; // using 100 for now
-                  ArmorShieldManager.addArmor(tank, armorValue);
-                  gameInstance.io.in(gameInstance.gameId).emit('armorAdded', {
-                    playerId,
-                    amount: armorValue,
-                    totalArmor: tank.armor
-                  });
-                  gameInstance.io.in(gameInstance.gameId).emit('playerListUpdated', gameInstance.playerManager.getAllPlayers());
+                    const armorValue = 100;
+                    ArmorShieldManager.addArmor(tank, armorValue);
+                    gameInstance.io.in(gameInstance.gameId).emit('armorAdded', {
+                        playerId,
+                        amount: armorValue,
+                        totalArmor: tank.armor
+                    });
+                    gameInstance.io.in(gameInstance.gameId).emit('playerListUpdated', gameInstance.playerManager.getAllPlayers());
                 }
-                break;                
+                break;
+
                 // -------------- CONSUMABLES ---------------
                 case 'RK01': // Repair Kit
-                    // TODO: Implement the repair logic
-                    // e.g., tank.repairHealth(25); // repairs 25 health points
+                    // Example: tank.repairHealth(25);
                     gameInstance.io.to(playerId).emit('message', 'Repair Kit used.');
                     break;
-                    case 'SB02': // Shield Boost
-                    {
-                      const shieldValue = 100; // using 100 for now
-                      ArmorShieldManager.addShield(tank, shieldValue);
-                      gameInstance.io.in(gameInstance.gameId).emit('shieldAdded', {
+                case 'SB02': // Shield Boost
+                {
+                    const shieldValue = 100;
+                    ArmorShieldManager.addShield(tank, shieldValue);
+                    gameInstance.io.in(gameInstance.gameId).emit('shieldAdded', {
                         playerId,
                         amount: shieldValue,
                         totalShield: tank.shield
-                      });
-                      gameInstance.io.in(gameInstance.gameId).emit('playerListUpdated', gameInstance.playerManager.getAllPlayers());
-                    }
-                    break;                
+                    });
+                    gameInstance.io.in(gameInstance.gameId).emit('playerListUpdated', gameInstance.playerManager.getAllPlayers());
+                }
+                break;
+
                 // -------------- MISC ---------------
                 case 'EF01': // Extra Fuel
-                    // TODO: Implement the extra fuel logic
-                    // e.g., tank.addFuel(10); // adds extra fuel for improved movement
+                    // Example: tank.addFuel(10);
                     gameInstance.io.to(playerId).emit('message', 'Extra Fuel applied.');
                     break;
-                
+
                 default:
                     gameInstance.io.to(playerId).emit('errorMessage', `Unknown item code: ${itemCode}`);
                     return;
             }
-            
-            // Optionally, broadcast the updated player state after using the item
+
+            // Optionally broadcast updated player state
             gameInstance.playerManager.broadcastPlayerUpdate(playerId);
             break;
+        }
     }
 }

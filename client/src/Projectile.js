@@ -82,36 +82,46 @@ class ClientProjectile {
     configureProjectile() {
         const styles = {
             missile: {
-                tempMeshColor: 0x00aa00,
-                meshColor: 0x00aa00,
+                tempMeshColor: 0xaaaaaa,
                 trailConfig: {
                     trailType: 'basic',
                     trailSize: this.projectileScale,
                     emitRate: 50
                 },
                 rotation: {
-                    type: 'velocity', // 'velocity' or 'constant'
+                    type: 'velocity', 
                     rotationAxis: null,
                     rotationSpeed: 0
                 }
             },
-            bomblet: {
-                tempMeshColor: 0xff4400,
-                meshColor: 0xaa4444,
+            balloon: {
+                tempMeshColor: 0xaaaaaa,
                 trailConfig: {
-                    trailType: 'basic',
+                    trailType: 'none',
+                    trailSize: this.projectileScale,
+                    emitRate: 0
+                },
+                rotation: {
+                    type: 'constant', 
+                    rotationAxis: new THREE.Vector3(0, 1, 0).normalize(),
+                    rotationSpeed: 5
+                }
+            },
+            bomblet: {
+                tempMeshColor: 0xaaaaaa,
+                trailConfig: {
+                    trailType: 'none',
                     trailSize: 1,
                     emitRate: 50
                 },
                 rotation: {
                     type: 'constant',
-                    rotationAxis: new THREE.Vector3(1, 1, 0).normalize(),
-                    rotationSpeed: 1800
+                    rotationAxis: new THREE.Vector3(0.3, 1, 0).normalize(),
+                    rotationSpeed: 200
                 }
             },
             default: {
-                tempMeshColor: 0xff0000,
-                meshColor: 0xff0000,
+                tempMeshColor: 0xaaaaaa,
                 trailConfig: {
                     trailType: 'basic',
                     trailSize: 1,
@@ -127,7 +137,6 @@ class ClientProjectile {
 
         const config = styles[this.projectileStyle] || styles.default;
         this.tempMeshColor = config.tempMeshColor;
-        this.meshColor = config.meshColor;
         this.trailConfig = {
             ...config.trailConfig,
             position: this.position,  // initial position
@@ -137,12 +146,12 @@ class ClientProjectile {
     }
 
     async setupVisuals() {
-        // Temporary sphere
+        // Temporary model
         this.tempMesh = this.createTempMesh();
         this.tempMesh.position.copy(this.position);
         this.scene.add(this.tempMesh);
 
-        // Load 3D model (optional)
+        // Load 3D model
         await this.loadProjectileModel();
 
         // Trails
@@ -168,22 +177,12 @@ class ClientProjectile {
         try {
             const modelPath = `./models/${this.projectileStyle}.glb`;
             const loadedModel = await ClientProjectile.modelCache.getModel(modelPath);
-            this.mesh = loadedModel.clone();
+            
+            // Create a proper clone that preserves materials
+            this.mesh = loadedModel.clone(true); // The 'true' parameter ensures materials are cloned too            
             this.mesh.scale.setScalar(this.projectileScale);
             this.mesh.position.copy(this.position);
-
-            this.mesh.traverse((child) => {
-                if (child.isMesh) {
-                    child.castShadow = true;
-                    child.receiveShadow = true;
-                    child.material = new THREE.MeshStandardMaterial({
-                        color: this.meshColor,
-                        metalness: 0.7,
-                        roughness: 0.3
-                    });
-                }
-            });
-
+        
             this.scene.add(this.mesh);
             if (this.tempMesh) {
                 this.scene.remove(this.tempMesh);
@@ -213,7 +212,7 @@ class ClientProjectile {
 
         // Lerp from current 'lerpPosition' to 'lerpTarget'
         // e.g. factor = 10 * deltaTime means we try to "reach" the target in ~0.1s
-        const lerpFactor = 10 * deltaTime;
+        const lerpFactor = 3 * deltaTime;
         this.lerpPosition.lerp(this.lerpTarget, lerpFactor);
 
         // Update the actual mesh to the 'lerpPosition'
@@ -255,6 +254,10 @@ class ClientProjectile {
         if (this.isFinalProjectile) {
             this.terrainRenderer.updateNormals();
         }
+    }
+    
+    getPosition() {
+        return this.position;
     }
 
     destroy() {

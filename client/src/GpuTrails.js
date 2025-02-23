@@ -18,6 +18,11 @@ export class TrailEffect {
       texture = './particles/smoke.png'
     } = params;
 
+    // If trailType is 'none', don't create any trail and return early
+    if (trailType === 'none') {
+      return;
+    }
+
     // Ensure position is a THREE.Vector3.
     const pos =
       position instanceof THREE.Vector3
@@ -210,27 +215,45 @@ export class TrailEffect {
   }
 
   updatePosition(trailId, position) {
-    this.particleManager.updateEmitter(trailId, { position: position });
-}
+    // Only update if the emitter exists
+    if (this.particleManager.emitters && this.particleManager.emitters.has(trailId)) {
+      this.particleManager.updateEmitter(trailId, { position: position });
+    }
+  }
 
   updateDirection(trailId, direction, scaleFactor = 400) {
-    // Ensure direction is a THREE.Vector3.
-    const directionVector =
-      direction instanceof THREE.Vector3
-        ? direction
-        : new THREE.Vector3(direction.x, direction.y, direction.z);
-    const normalizedDir = directionVector.clone().normalize();
-    this.particleManager.updateEmitter(trailId, {
-      direction: normalizedDir
-    });
+    // Only update if the emitter exists
+    if (this.particleManager.emitters && this.particleManager.emitters.has(trailId)) {
+      // Ensure direction is a THREE.Vector3.
+      const directionVector =
+        direction instanceof THREE.Vector3
+          ? direction
+          : new THREE.Vector3(direction.x, direction.y, direction.z);
+      const normalizedDir = directionVector.clone().normalize();
+      this.particleManager.updateEmitter(trailId, {
+        direction: normalizedDir
+      });
+    }
   }
 
   stopTrail(trailId) {
-    // Stop emission by setting spawnRate to 0.
-    this.particleManager.updateEmitter(trailId, { spawnRate: 0 });
+    // Only update if the emitter exists
+    if (this.particleManager.emitters && this.particleManager.emitters.has(trailId)) {
+      // Stop emission by setting spawnRate to 0.
+      this.particleManager.updateEmitter(trailId, { spawnRate: 0 });
+    }
   }
 
   removeTrail(trailId) {
-    this.particleManager.removeEmitter(trailId);
+    // Only remove if the emitter exists
+    if (this.particleManager.emitters && this.particleManager.emitters.has(trailId)) {
+      this.particleManager.removeEmitter(trailId);
+    }
+    
+    // Also check for and remove the fire overlay if it exists
+    const fireTrailId = trailId + 'fire';
+    if (this.particleManager.emitters && this.particleManager.emitters.has(fireTrailId)) {
+      this.particleManager.removeEmitter(fireTrailId);
+    }
   }
 }

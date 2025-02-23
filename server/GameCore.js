@@ -45,6 +45,7 @@ export default class GameCore {
       this.terrainManager,
       this.helicopterManager
     );
+    this.helicopterManager.projectileManager = this.projectileManager;
         this.roundManager = new RoundManager(this, totalRounds);
 
     // Timer and state management
@@ -431,7 +432,7 @@ export default class GameCore {
     this.networking.broadcastRoundStartingSoon(currentRound, totalRounds);
   }
 
-  async handleProjectileImpact(impactEvent) {
+  handleProjectileImpact(impactEvent) {
     if (this._isDestroyed) {
       return;
     }

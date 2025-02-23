@@ -58,8 +58,6 @@ class FPSDisplay {
     }
 }
 
-
-
 export class Game extends EventEmitter {
     constructor(socket) {
         super(); // Initialize EventEmitter
@@ -87,8 +85,7 @@ export class Game extends EventEmitter {
         this.sceneManager = new SceneManager(this);
         this.shopManager = new ShopManager(this.socket, 5000);
         this.playerManager = new PlayerManager(this);
-        this.timelineManager = new ProjectileTimelineManager(this);
-        }
+    }
 
     init(gameData) {
         if (gameData.terrain) this.currentTheme = gameData.terrain.theme;
@@ -118,8 +115,11 @@ export class Game extends EventEmitter {
             this.sceneManager.loader,
             this.terrainRenderer,
             this.gpuParticleManager,
-            this.dmgManager
+            this.dmgManager,
+            this
         );
+        this.timelineManager = new ProjectileTimelineManager(this, this.helicopterManager);
+
         this.sceneManager.loadEXR(this.scene, this.renderer, './hdri/hut.exr');
         this.sceneManager.loadTableModel(this.scene);
         if (gameData.turnTimeRemaining !== undefined) {
@@ -132,7 +132,7 @@ export class Game extends EventEmitter {
                 currentPlayerId: this.playerManager.currentPlayerId,
                 turnDuration: this.turnDuration,
                 turnStart: this.turnStartTime,
-              });
+            });
         }
 
         this.renderPass = new RenderPass(this.scene, this.cameraManager.camera);
@@ -153,7 +153,6 @@ export class Game extends EventEmitter {
             if (typeof currentTank.turretYawCurrent === 'number') {
                 this.cameraManager.yaw = THREE.MathUtils.degToRad(currentTank.turretYawCurrent) + Math.PI;
             }
-        
         }
 
         this.renderer.shadowMap.enabled = true;
@@ -162,48 +161,47 @@ export class Game extends EventEmitter {
         const pingManager = new PingManager(this.socket);
         pingManager.start();
         if (gameData.currentRound === 0) this.cameraManager.setView('preGame');
-
-
     }
 
-    // Called when the server sends a complete timeline
+    // Called when the server sends a complete projectile timeline
     handleFullProjectileTimeline(timelineData) {
-        
-        // Let the timeline manager handle it.
+        console.log(timelineData);
         this.timelineManager.queueTimeline(timelineData);
     }
 
     isInPreGame() {
         return this.state === 'pregame';
-      }
+    }
       
-      isPlaying() {
+    isPlaying() {
         return this.state === 'playing';
-      }
+    }
       
-      isGameOver() {
+    isGameOver() {
         return this.state === 'postgame';
-      }
+    }
 
     spawnExistingHelicopters(helicopterStates) {
+        // Expect each helicopter state to now include plannedPath and planStartTime.
         helicopterStates.forEach((heliState) => {
             this.spawnHelicopter({
                 id: heliState.id,
                 state: heliState,
+                plannedPath: heliState.plannedPath,
+                planStartTime: heliState.planStartTime
             });
+            console.log(heliState.plannedPath);
         });
     }
 
     spawnHelicopter(data) {
+        // data should include id, state, plannedPath, and planStartTime.
         this.helicopterManager.spawnHelicopter(data);
     }
     
-    updateHelicopters(states) {
-        this.helicopterManager.updateHelicopters(states);
-    }
-    
-    updateHelicopterWaypoint(data) {
-        this.helicopterManager.updateHelicopterWaypoint(data);
+    updateHelicopterPlan(data) {
+        // When the server sends updated plan data (including plannedPath and planStartTime).
+        this.helicopterManager.updateHelicopterPlan(data);
     }
     
     handleHelicopterDamage(data) {
@@ -254,9 +252,28 @@ export class Game extends EventEmitter {
 
     setupEventListeners() {
         window.addEventListener('resize', () => this.handleResize());
-    
+        
+        // New helicopter events from the server:
+        this.socket.on('spawnHelicopter', data => {
+            // data includes id, state, plannedPath, and planStartTime
+            this.spawnHelicopter(data);
+        });
+
+          // Make sure you're listening for the path update events where you set up your socket handlers:
+        this.socket.on('helicopterPathUpdate', (data) => {
+            this.helicopterManager.updateHelicopterPath(data);
+        });
+
+        this.socket.on('helicopterDamage', data => {
+            this.handleHelicopterDamage(data);
+        });
+        this.socket.on('removeHelicopter', data => {
+            // data can be simply the helicopter id, or an object containing the id.
+            this.removeHelicopter(data.id || data);
+        });
+        
+        // Existing event listeners:
         this.socket.on('shieldAdded', data => {
-            // data: { playerId, amount, totalShield }
             const player = this.playerManager.getPlayer(data.playerId);
             if (player) {
                 player.setShield(data.totalShield);
@@ -267,14 +284,11 @@ export class Game extends EventEmitter {
             }
         });
             
-        // Handle armor updates from the server
         this.socket.on('armorAdded', data => {
             const player = this.playerManager.getPlayer(data.playerId);
             if (player) {
-                // Update the tank’s armor property so the UI can display the new value
                 player.setArmor(data.totalArmor);
                 console.log(`Armor added to ${player.name}: +${data.amount}, total armor: ${data.totalArmor}`);
-                // Optionally, update any armor-specific UI elements here.
             } else {
                 console.warn('Local player not found.');
             }
@@ -304,10 +318,8 @@ export class Game extends EventEmitter {
     handlePlayerDefeated(data) {
         const playerKilled = this.playerManager.getPlayer(data.id);
         if (playerKilled) {
-            playerKilled.destroy();  // This will set isAlive = false and hide the tank
+            playerKilled.destroy();
             notificationManager.showMessage(`${playerKilled.name} Destroyed!`, 5000);
-            
-            // If the current player was defeated, switch to an overhead view
             if (data.id === this.playerManager.currentPlayerId) {
                 this.cameraManager.setView('overhead');
             }
@@ -336,8 +348,6 @@ export class Game extends EventEmitter {
             this.cameraManager.yaw = THREE.MathUtils.degToRad(currentTank.turretYawCurrent) + Math.PI;
         }
         notificationManager.showMessage(`${currentTank.name}'s Turn!`, 3000);
-        
-        // Emit state change to 'playing'
         this.state = 'playing';
         this.emit('stateChange', this.state);
     }
@@ -346,7 +356,6 @@ export class Game extends EventEmitter {
         const projectile = new ClientProjectile(data, this.scene, this.gpuParticleManager, this.terrainRenderer);
         this.projectiles.push(projectile); 
         this.currentPlayerHasFired = true;
-        
     }
     
     handleTerrainPatch(patch) {
@@ -379,6 +388,7 @@ export class Game extends EventEmitter {
         this.updateTerrainShaders();
         this.updateSunPosition(deltaTime);
         this.terrainRenderer.updateReflections(this.renderer, this.scene, this.cameraManager.camera);
+        // Update helicopters based on their pre-planned paths.
         this.helicopterManager.update(deltaTime);
     }
 
@@ -386,7 +396,7 @@ export class Game extends EventEmitter {
         if (!this.sceneManager.directionalLight) return;
         const rotationAngle = (this.sunRotationRPM * Math.PI * 2 * deltaTime) / 60;
         this.sceneManager.directionalLight.position.applyAxisAngle(
-            new THREE.Vector3(1, 0, 1), // Rotate around Z axis
+            new THREE.Vector3(1, 0, 1),
             rotationAngle
         );
         this.sceneManager.directionalLight.lookAt(0, 0, 0);
@@ -394,6 +404,7 @@ export class Game extends EventEmitter {
             this.sceneManager.directionalLight.shadow.camera.updateProjectionMatrix();
         }
     }
+    
     updateProjectiles(deltaTime) {
         this.projectiles.forEach(proj => {
             proj.update(deltaTime);
@@ -411,17 +422,16 @@ export class Game extends EventEmitter {
         if (this.terrainRenderer.currentTheme === 'grassland' && 
             this.terrainRenderer.surfacePlane && 
             this.terrainRenderer.surfacePlane.material.uniforms) {      
-        if (this.terrainRenderer.surfacePlane.material.uniforms.uTime) {
-            this.terrainRenderer.surfacePlane.material.uniforms.uTime.value = 
-                this.clock.getElapsedTime();
-        }
-        this.dronePass.material.uniforms.time.value = this.clock.getElapsedTime() * 0.001;
-        if (this.terrainRenderer.material.uniforms.lightPosition &&
-            this.sceneManager.directionalLight) {
-            this.terrainRenderer.material.uniforms.lightPosition.value.copy(
-                this.sceneManager.directionalLight.position
-            );
-        }
+            if (this.terrainRenderer.surfacePlane.material.uniforms.uTime) {
+                this.terrainRenderer.surfacePlane.material.uniforms.uTime.value = this.clock.getElapsedTime();
+            }
+            this.dronePass.material.uniforms.time.value = this.clock.getElapsedTime() * 0.001;
+            if (this.terrainRenderer.material.uniforms.lightPosition &&
+                this.sceneManager.directionalLight) {
+                this.terrainRenderer.material.uniforms.lightPosition.value.copy(
+                    this.sceneManager.directionalLight.position
+                );
+            }
         }
     }
 }

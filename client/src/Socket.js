@@ -177,27 +177,16 @@ const setupShopEvents = () => {
 };
 
 const setupHelicopterEvents = () => {
-    socket.on('spawnHelicopter', (data) => {
-        game.spawnHelicopter(data);
-    });
     socket.on('spawnExistingHelicopters', (helicopterStates) => {
         game.spawnExistingHelicopters(helicopterStates);
     });
-    
-    socket.on('helicopterStates', (states) => {
-        game.updateHelicopters(states);
-    });
-    
-    socket.on('helicopterNewWaypoint', (data) => {
-        game.updateHelicopterWaypoint(data);
-    });
-    
+        
     socket.on('helicopterDamaged', (data) => {
         game.handleHelicopterDamage(data);
     });
     
     socket.on('helicopterDestroyed', (data) => {
-        game.removeHelicopter(data.id);
+        game.removeHelicopter(data.helicopterId);
     });
 };
 

@@ -1,4 +1,3 @@
-// ModelCache.js
 import * as THREE from 'three';
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
@@ -25,7 +24,11 @@ export class ModelCache {
         const loadPromise = this.loader.loadAsync(modelPath)
             .then(gltf => {
                 const model = gltf.scene;
-                this.setupModelMaterials(model);
+                // Removed the setupModelMaterials call that was replacing materials
+                
+                // Optionally, you can enhance the existing materials instead
+                this.enhanceModelMaterials(model);
+                
                 this.cache.set(modelPath, model);
                 this.loadingPromises.delete(modelPath);
                 return model.clone();
@@ -40,16 +43,31 @@ export class ModelCache {
         return loadPromise;
     }
 
-    setupModelMaterials(model) {
+    // Optional: Enhance materials without replacing them
+    enhanceModelMaterials(model) {
         model.traverse((child) => {
             if (child.isMesh) {
-                child.material = new THREE.MeshStandardMaterial({
-                    color: 0xff0000,
-                    metalness: 0.7,
-                    roughness: 0.3,
-                    emissive: 0xff0000,
-                    emissiveIntensity: 0.5
-                });
+                // For meshes with no material, provide a default one
+                if (!child.material) {
+                    child.material = new THREE.MeshStandardMaterial({
+                        color: 0xcccccc,
+                        metalness: 0.7,
+                        roughness: 0.3
+                    });
+                } 
+                // For existing materials, you can optionally enhance them
+                else if (child.material.isMeshStandardMaterial) {
+                    // Ensure metalness and roughness are set if they aren't already
+                    if (child.material.metalness === undefined) child.material.metalness = 0.7;
+                    if (child.material.roughness === undefined) child.material.roughness = 0.3;
+                }
+                
+                // Make sure materials receive shadows
+                if (child.material) {
+                    child.material.needsUpdate = true;
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+                }
             }
         });
     }

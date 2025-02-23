@@ -1,318 +1,334 @@
+// client/Helicopter.js
+
 import * as THREE from 'three';
 
 export class Helicopter {
-    constructor(scene, loader, terrainRenderer) {
-        this.scene = scene;
-        this.loader = loader;
-        this.terrainRenderer = terrainRenderer;
-        this.bodyPath = './models/helicopter_body.glb';
-        this.bladesPath = '/models/helicopter_blades.glb';
-        
-        // Main properties
-        this.body = null;
-        this.blades = null;
-        this.group = new THREE.Group();
-        
-        // Movement properties
-        this.forward = new THREE.Vector3(0, 0, 1);
-        this.targetPosition = new THREE.Vector3();
-        this.maxTurnRate = Math.PI * 0.5;
-        this.currentTurnRate = 0;
-        this.turnAcceleration = Math.PI * 0.2;
-        this.maxBankAngle = Math.PI * 0.25;
-        this.currentBankAngle = 0;
-        this.bankingSmoothness = 0.05;
-        
-        // Speed properties
-        this.maxSpeed = 100;
-        this.currentSpeed = 0;
-        this.acceleration = 10;
-        this.deceleration = 15;
-        this.rotationSpeed = 15;
-        this.arrivalThreshold = 5;
-        
-        // Terrain avoidance properties
-        this.targetHeight = 200;
-        this.heightLerpSpeed = 0.5;
-        this.minHeightAboveTerrain = 100;
-        this.forwardCheckDistance = 100;
-        this.heightCheckAngles = [0, Math.PI/6, Math.PI/3]; // 0°, 30°, 60° from horizontal
-        this.speedReductionFactor = 0.7; // How much to reduce speed when terrain is detected
-        
-        // Autonomous movement properties
-        this.lastWaypointUpdate = 0;
-        this.waypointInterval = 10000;
-        this.autonomous = true;
-        
-        this.init();
-    }
-    
-    async init() {
-        try {
-            const [bodyModel, bladesModel] = await Promise.all([
-                this.loadModel(this.bodyPath),
-                this.loadModel(this.bladesPath)
-            ]);
-            
-            this.body = bodyModel.scene;
-            this.blades = bladesModel.scene;
+  constructor(scene, loader, terrainRenderer) {
+    this.scene = scene;
+    this.loader = loader;
+    this.terrainRenderer = terrainRenderer;
+    this.bodyPath = './models/helicopter_body.glb';
+    this.bladesPath = './models/helicopter_blades.glb';
 
-            this.body.traverse((child) => {
-                if (child.isMesh) {
-                    child.castShadow = true;
-                    child.receiveShadow = true;
-                    if (child.material) {
-                        child.material.metalness = 0.3;
-                        child.material.roughness = 0.4;
-                    }
-                }
-            });
-            
-            this.blades.traverse((child) => {
-                if (child.isMesh) {
-                    child.castShadow = true;
-                    child.receiveShadow = true;
-                    if (child.material) {
-                        child.material.metalness = 0.3;
-                        child.material.roughness = 0.4;
-                    }
-                }
-            });            
-            this.group.add(this.body);
-            this.group.add(this.blades);
-            this.scene.add(this.group);
-            
-            this.group.position.set(0, 200, 0);
-            this.setScale(5);
-        } catch (error) {
-            console.error('Error loading helicopter models:', error);
+    // Group to hold the helicopter models.
+    this.group = new THREE.Group();
+    this.scene.add(this.group);
+
+    // Planned path from the server, with relative times (in seconds).
+    this.plannedPath = [];
+    // The local (performance.now) time at which the plan starts.
+    this.planStartTime = performance.now();
+    // Total duration of the current plan.
+    this.planDuration = 0;
+
+    this.lastKnownState = {
+        position: new THREE.Vector3(),
+        rotationY: 0,
+        bankAngle: 0,
+        speed: 0,
+        timestamp: 0
+      };
+      this.transitionDuration = 0.2; // Duration in seconds for smooth transitions
+      this.isTransitioning = false;
+      this.transitionStartTime = 0;
+      this.transitionEndState = null;
+
+    // Models
+    this.body = null;
+    this.blades = null;
+
+    this.autonomous = false;
+
+    this.init();
+  }
+
+  async init() {
+    try {
+      const [bodyModel, bladesModel] = await Promise.all([
+        this.loadModel(this.bodyPath),
+        this.loadModel(this.bladesPath)
+      ]);
+      this.body = bodyModel.scene;
+      this.blades = bladesModel.scene;
+
+      // Configure shadows.
+      this.body.traverse(child => {
+        if (child.isMesh) {
+          child.castShadow = true;
+          child.receiveShadow = true;
         }
-    }
-
-    checkTerrainHeight() {
-        const position = this.group.position;
-        const rotation = this.group.rotation;
-        const forward = new THREE.Vector3(0, 0, 1).applyEuler(rotation);
-        const heightChecks = [];
-
-        // Check terrain height at multiple angles
-        for (const angle of this.heightCheckAngles) {
-            const checkVector = forward.clone()
-                .applyAxisAngle(new THREE.Vector3(1, 0, 0), -angle)
-                .normalize()
-                .multiplyScalar(this.forwardCheckDistance);
-            
-            const checkPoint = position.clone().add(checkVector);
-            const terrainHeight = this.terrainRenderer.getHeightAtPosition(
-                checkPoint.x,
-                checkPoint.z
-            );
-            
-            heightChecks.push(terrainHeight);
+      });
+      this.blades.traverse(child => {
+        if (child.isMesh) {
+          child.castShadow = true;
+          child.receiveShadow = true;
         }
+      });
 
-        // Calculate target height based on terrain checks
-        const maxTerrainHeight = Math.max(...heightChecks);
-        const newTargetHeight = maxTerrainHeight + this.minHeightAboveTerrain;
-        
-        // Adjust speed if terrain is rising rapidly
-        if (newTargetHeight > this.targetHeight) {
-            const heightDifference = newTargetHeight - this.targetHeight;
-            const speedReduction = Math.min(
-                1.0,
-                heightDifference / this.minHeightAboveTerrain
-            ) * this.speedReductionFactor;
-            
-            this.currentSpeed *= (1 - speedReduction);
+      this.group.add(this.body);
+      this.group.add(this.blades);
+      this.setScale(5);
+    } catch (error) {
+      console.error('Error loading helicopter models:', error);
+    }
+  }
+
+  loadModel(path) {
+    return new Promise((resolve, reject) => {
+      this.loader.load(
+        path,
+        gltf => resolve(gltf),
+        undefined,
+        error => reject(error)
+      );
+    });
+  }
+
+  /**
+   * Sets a new planned path.
+   * @param {Array} plannedPath - Array of states with relative times (0 … N seconds)
+   * @param {number} serverPlanStart - Server timestamp (ms) indicating when time=0 begins.
+   * @param {number} [updateIndex] - (Optional) The update sequence index.
+   */
+  setPlannedPath(plannedPath, serverPlanStart, updateIndex) {
+    // Handle update index check
+    if (updateIndex !== undefined) {
+      if (this.lastPlanIndex !== undefined && updateIndex <= this.lastPlanIndex) {
+        return;
+      }
+      this.lastPlanIndex = updateIndex;
+    }
+  
+    // Convert server time to local performance time
+    const newPlanStartTime = this.convertServerTimeToPerformanceTime(serverPlanStart);
+  
+    // Get exact current state including actual current position
+    const currentTime = performance.now();
+    this.lastKnownState = {
+      position: this.group.position.clone(), // Use actual current position
+      rotationY: this.group.rotation.y,
+      bankAngle: -this.group.rotation.z, // Note the negative since we store bank angle positive
+      speed: this.getInterpolatedState(currentTime).speed,
+      timestamp: currentTime
+    };
+  
+    // Start transition
+    this.isTransitioning = true;
+    this.transitionStartTime = currentTime;
+    
+    // Create transition target state from first point of new plan
+    this.transitionEndState = plannedPath.length > 0 ? {
+      position: new THREE.Vector3(
+        plannedPath[0].position.x,
+        plannedPath[0].position.y,
+        plannedPath[0].position.z
+      ),
+      rotationY: plannedPath[0].rotationY,
+      bankAngle: plannedPath[0].bankAngle,
+      speed: plannedPath[0].speed
+    } : null;
+  
+    // Update plan timing
+    this.planStartTime = newPlanStartTime;
+    
+    // Convert plan points
+    this.plannedPath = plannedPath.map(pt => ({
+      time: pt.time,
+      position: new THREE.Vector3(pt.position.x, pt.position.y, pt.position.z),
+      rotationY: pt.rotationY,
+      bankAngle: pt.bankAngle,
+      speed: pt.speed
+    }));
+  
+    this.planDuration = this.plannedPath.length > 0 ? 
+      this.plannedPath[this.plannedPath.length - 1].time : 0;
+  }
+  
+
+  /**
+   * Converts a server timestamp (ms) into the local performance.now() domain.
+   */
+  convertServerTimeToPerformanceTime(serverTimeMs) {
+    const currentPerformanceTime = performance.now();
+    const currentServerTime = Date.now();
+    const diff = serverTimeMs - currentServerTime;
+    return currentPerformanceTime + diff;
+  }
+
+  /**
+   * Returns the current interpolated state from the planned path.
+   * @param {number} [currentTime] - The current time (default performance.now()).
+   * @returns {object} An object with position (Vector3), rotationY, bankAngle, and speed.
+   */
+  getInterpolatedState(currentTime = performance.now()) {
+    if (!this.plannedPath.length) {
+      return {
+        position: this.group.position.clone(),
+        rotationY: this.group.rotation.y,
+        bankAngle: 0,
+        speed: 0
+      };
+    }
+    const elapsed = (currentTime - this.planStartTime) / 1000;
+    if (elapsed <= 0) {
+      const first = this.plannedPath[0];
+      return {
+        position: first.position.clone(),
+        rotationY: first.rotationY,
+        bankAngle: first.bankAngle,
+        speed: first.speed
+      };
+    }
+    const last = this.plannedPath[this.plannedPath.length - 1];
+    if (elapsed >= last.time) {
+      return {
+        position: last.position.clone(),
+        rotationY: last.rotationY,
+        bankAngle: last.bankAngle,
+        speed: last.speed
+      };
+    }
+    let i = 0;
+    while (i < this.plannedPath.length - 1 && this.plannedPath[i + 1].time < elapsed) {
+      i++;
+    }
+    const stateA = this.plannedPath[i];
+    const stateB = this.plannedPath[i + 1];
+    const range = stateB.time - stateA.time;
+    const alpha = (elapsed - stateA.time) / range;
+    const position = stateA.position.clone().lerp(stateB.position, alpha);
+    const rotationY = THREE.MathUtils.lerp(stateA.rotationY, stateB.rotationY, alpha);
+    const bankAngle = THREE.MathUtils.lerp(stateA.bankAngle, stateB.bankAngle, alpha);
+    const speed = THREE.MathUtils.lerp(stateA.speed, stateB.speed, alpha);
+    return { position, rotationY, bankAngle, speed };
+  }
+
+  /**
+   * Update called every frame.
+   * @param {number} deltaTime - Time (in seconds) since last frame.
+   * @param {number} currentTime - Typically performance.now().
+   */
+  update(deltaTime, currentTime) {
+    this.updateFromPlan(currentTime);
+    this.updateRotors(deltaTime);
+  }
+
+  /**
+   * Interpolates position and rotation from the planned path.
+   */
+  updateFromPlan(currentTime) {
+    if (!this.plannedPath.length && !this.isTransitioning) {
+      return;
+    }
+  
+    let targetState;
+    
+    if (this.isTransitioning) {
+      // Handle transition period
+      const transitionElapsed = (currentTime - this.transitionStartTime) / 1000;
+      const transitionAlpha = Math.min(transitionElapsed / this.transitionDuration, 1.0);
+      
+      if (transitionAlpha >= 1.0) {
+        // Transition complete
+        this.isTransitioning = false;
+        if (this.plannedPath.length === 0) {
+          return;
         }
+      } else {
+        // Interpolate during transition
+        const start = this.lastKnownState;
+        const end = this.transitionEndState;
+        
+        // Use smooth step for more natural easing
+        // Use a smoother easing function (cubic)
+        const smoothAlpha = transitionAlpha * transitionAlpha * transitionAlpha * (transitionAlpha * (transitionAlpha * 6 - 15) + 10);
+        
+        const pos = start.position.clone().lerp(end.position, smoothAlpha);
+        this.group.position.copy(pos);
+  
+        // Handle rotation interpolation with shortest path
+        let deltaY = end.rotationY - start.rotationY;
+        if (deltaY > Math.PI) deltaY -= 2 * Math.PI;
+        if (deltaY < -Math.PI) deltaY += 2 * Math.PI;
+        const rotY = start.rotationY + deltaY * smoothAlpha;
+        
+        const bankZ = THREE.MathUtils.lerp(start.bankAngle, end.bankAngle, smoothAlpha);
+        this.group.rotation.set(0, rotY, -bankZ, 'YXZ');
+        return;
+      }
+    }
+  
+    // Normal plan following
+    const elapsed = (currentTime - this.planStartTime) / 1000;
+    
+    if (elapsed <= 0) {
+      targetState = this.plannedPath[0];
+    } else if (elapsed >= this.planDuration) {
+      targetState = this.plannedPath[this.plannedPath.length - 1];
+      // Store last known good state when plan ends
+      this.lastKnownState = {
+        position: targetState.position.clone(),
+        rotationY: targetState.rotationY,
+        bankAngle: targetState.bankAngle,
+        speed: targetState.speed,
+        timestamp: currentTime
+      };
+    } else {
+      // Find surrounding points and interpolate
+      let i = 0;
+      while (i < this.plannedPath.length - 1 && this.plannedPath[i + 1].time < elapsed) {
+        i++;
+      }
+      const stateA = this.plannedPath[i];
+      const stateB = this.plannedPath[i + 1];
+      const range = stateB.time - stateA.time;
+      const alpha = (elapsed - stateA.time) / range;
+      
+      const pos = stateA.position.clone().lerp(stateB.position, alpha);
+      this.group.position.copy(pos);
+  
+      // Interpolate heading with shortest path
+      let rotY = stateA.rotationY;
+      let deltaY = stateB.rotationY - stateA.rotationY;
+      if (deltaY > Math.PI) deltaY -= 2 * Math.PI;
+      if (deltaY < -Math.PI) deltaY += 2 * Math.PI;
+      rotY += deltaY * alpha;
+      
+      const bankZ = THREE.MathUtils.lerp(stateA.bankAngle, stateB.bankAngle, alpha);
+      this.group.rotation.set(0, rotY, -bankZ, 'YXZ');
+    }
+  }
+  /**
+   * Update rotor animation.
+   */
+  updateRotors(deltaTime) {
+    if (!this.blades) return;
+    this.blades.rotation.y += 20 * deltaTime;
+  }
 
-        this.targetHeight = newTargetHeight;
-    }
-    
-    loadModel(path) {
-        return new Promise((resolve, reject) => {
-            this.loader.load(
-                path,
-                (gltf) => resolve(gltf),
-                undefined,
-                (error) => reject(error)
-            );
-        });
-    }
-        
-    updateWaypoint(x, y, z) {
-        this.autonomous = false;
-        this.targetPosition.set(x, y, z);
-        this.lastWaypointUpdate = Date.now();
-    }
+  setScale(s) {
+    this.group.scale.set(s, s, s);
+  }
 
-    generateRandomWaypoint() {
-        const x = (Math.random() * 1500) - 750;
-        const y = Math.random() * 200 + 200;
-        const z = (Math.random() * 1500) - 750;
-        return new THREE.Vector3(x, y, z);
-    }
+  getPosition() {
+    return this.group.position;
+  }
 
-    setAutonomous(enabled) {
-        this.autonomous = enabled;
-        if (enabled) {
-            this.targetPosition.copy(this.generateRandomWaypoint());
-            this.lastWaypointUpdate = Date.now();
-        }
+  dispose() {
+    if (this.body) {
+      this.scene.remove(this.body);
+      this.body.traverse(child => {
+        if (child.geometry) child.geometry.dispose();
+        if (child.material) child.material.dispose();
+      });
     }
-
-    calculateDesiredTurnRate(currentForward, targetDirection) {
-        const angle = currentForward.angleTo(targetDirection);
-        const cross = new THREE.Vector3();
-        cross.crossVectors(currentForward, targetDirection);
-        const turnDirection = Math.sign(cross.y);
-        return Math.min(this.maxTurnRate, angle) * turnDirection;
+    if (this.blades) {
+      this.scene.remove(this.blades);
+      this.blades.traverse(child => {
+        if (child.geometry) child.geometry.dispose();
+        if (child.material) child.material.dispose();
+      });
     }
-
-    updateRotation(deltaTime, targetDirection) {
-        const currentForward = new THREE.Vector3(0, 0, 1).applyEuler(this.group.rotation);
-        const desiredTurnRate = this.calculateDesiredTurnRate(currentForward, targetDirection);
-        
-        if (Math.abs(desiredTurnRate) > 0.01) {
-            this.currentTurnRate += Math.sign(desiredTurnRate - this.currentTurnRate) * 
-                                  this.turnAcceleration * deltaTime;
-        } else {
-            this.currentTurnRate *= 0.95;
-        }
-        
-        this.currentTurnRate = THREE.MathUtils.clamp(
-            this.currentTurnRate, 
-            -this.maxTurnRate, 
-            this.maxTurnRate
-        );
-        
-        const targetBankAngle = (this.currentTurnRate / this.maxTurnRate) * this.maxBankAngle;
-        this.currentBankAngle += (targetBankAngle - this.currentBankAngle) * 
-                                this.bankingSmoothness;
-        
-        this.group.rotation.y += this.currentTurnRate * deltaTime;
-        this.group.rotation.z = -this.currentBankAngle;
-    }
-
-    calculateMovementSpeed(deltaTime, distanceToTarget) {
-        const shouldDecelerate = distanceToTarget < 
-            (this.currentSpeed * this.currentSpeed) / (2 * this.deceleration);
-
-        if (shouldDecelerate) {
-            this.currentSpeed = Math.max(0, 
-                this.currentSpeed - this.deceleration * deltaTime);
-        } else {
-            this.currentSpeed = Math.min(this.maxSpeed, 
-                this.currentSpeed + this.acceleration * deltaTime);
-        }
-
-        return this.currentSpeed;
-    }
-    
-    update(deltaTime) {
-        if (!this.body || !this.blades) return;
-
-        const currentTime = Date.now();
-        
-        if (this.autonomous && 
-            (currentTime - this.lastWaypointUpdate > this.waypointInterval)) {
-            this.targetPosition.copy(this.generateRandomWaypoint());
-            this.lastWaypointUpdate = currentTime;
-        }
-        
-        // Check terrain and update target height
-        this.checkTerrainHeight();
-        
-        // Lerp current height to target height
-        const currentHeight = this.group.position.y;
-        const newHeight = THREE.MathUtils.lerp(
-            currentHeight,
-            this.targetHeight,
-            this.heightLerpSpeed * deltaTime
-        );
-        this.group.position.y = newHeight;
-        
-        const toTarget = new THREE.Vector3()
-            .subVectors(this.targetPosition, this.group.position)
-            .normalize();
-        
-        this.updateRotation(deltaTime, toTarget);
-        
-        const distanceToTarget = this.group.position.distanceTo(this.targetPosition);
-        
-        if (distanceToTarget > this.arrivalThreshold) {
-            const speed = this.calculateMovementSpeed(deltaTime, distanceToTarget);
-            
-            const movement = new THREE.Vector3(0, 0, speed * deltaTime)
-                .applyEuler(this.group.rotation);
-            this.group.position.add(movement);
-        } else {
-            this.currentSpeed = 0;
-        }
-        
-        if (this.blades) {
-            this.blades.rotation.y += this.rotationSpeed * deltaTime;
-        }
-    }
-    
-    setMaxTurnRate(rate) {
-        this.maxTurnRate = Math.max(0, rate);
-    }
-    
-    setTurnAcceleration(acc) {
-        this.turnAcceleration = Math.max(0, acc);
-    }
-    
-    setMaxBankAngle(angle) {
-        this.maxBankAngle = THREE.MathUtils.clamp(angle, 0, Math.PI * 0.5);
-    }
-    
-    setBankingSmoothness(smoothness) {
-        this.bankingSmoothness = THREE.MathUtils.clamp(smoothness, 0.01, 1);
-    }
-    
-    setMaxSpeed(speed) {
-        this.maxSpeed = Math.max(0, speed);
-    }
-    
-    setAcceleration(acc) {
-        this.acceleration = Math.max(0, acc);
-    }
-    
-    setDeceleration(dec) {
-        this.deceleration = Math.max(0, dec);
-    }
-    
-    setRotationSpeed(speed) {
-        this.rotationSpeed = speed;
-    }
-    
-    getPosition() {
-        return this.group.position;
-    }
-
-    setScale(scale) {
-        if (!this.group) return;
-        this.group.scale.set(scale, scale, scale);
-    }
-    
-    dispose() {
-        if (this.body) {
-            this.scene.remove(this.body);
-            this.body.traverse((child) => {
-                if (child.geometry) child.geometry.dispose();
-                if (child.material) child.material.dispose();
-            });
-        }
-        
-        if (this.blades) {
-            this.scene.remove(this.blades);
-            this.blades.traverse((child) => {
-                if (child.geometry) child.geometry.dispose();
-                if (child.material) child.material.dispose();
-            });
-        }
-        
-        this.scene.remove(this.group);
-    }
+    this.scene.remove(this.group);
+  }
 }

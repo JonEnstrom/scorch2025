@@ -13,6 +13,10 @@ export class MountainMercWeapon {
     this.upwardAngle = Math.PI / 6;  // Possibly not used, but included
     this.childPowerMultiplier = 0.9; // Children move slower than parent
 
+    // Dynamic time factor properties:
+    this.childTimeFactor = 0.33;     // initial speed factor (burst speed)
+    this.childTimeFactorRate = 1.0;  // increases by 1.0 per second
+
     // Register an impact handler in the new format:
     this.projectileManager.registerWeaponHandler(
       this.id,
@@ -20,12 +24,6 @@ export class MountainMercWeapon {
     );
   }
 
-  /**
-   * Fire method (pre-calculated approach).
-   * 1) Simulate a single "parent" projectile (not final).
-   * 2) Then broadcast the timeline and schedule turn 
-   *    after we see if children are spawned on impact.
-   */
   fire(tank, playerId, gameCore) {
     const projectileData = [{
       startPos: tank.getBarrelTip(),
@@ -33,11 +31,12 @@ export class MountainMercWeapon {
       power: tank.power,
       isFinalProjectile: false,       // parent spawns children on impact
       explosionType: 'normal',
-      explosionSize: 0.1,
+      explosionSize: 0.5,
       projectileScale: 3,
       projectileStyle: 'missile',
       craterSize: 1,
-      baseDamage: 40 // or whatever minimal damage
+      baseDamage: 40, // or whatever minimal damage
+      timeFactor: 1.0 // Parent projectile uses normal speed
     }];
 
     // 1) Simulate the "parent" projectile
@@ -52,10 +51,6 @@ export class MountainMercWeapon {
     this._broadcastAndScheduleTurn(gameCore, timeline);
   }
 
-  /**
-   * Handle an impact from the parent projectile:
-   *  - Spawn child projectiles as sub-projectiles (some final).
-   */
   handleImpact(impactEvent, timeline, manager) {
     // If it was final or it hit a helicopter, do nothing
     if (impactEvent.isFinalProjectile || impactEvent.isHelicopterHit) {
@@ -66,33 +61,22 @@ export class MountainMercWeapon {
     const childProjectiles = this.createChildProjectiles(
       impactEvent.position,
       impactEvent.playerId,
-      impactEvent.power || 180  // default power if not found
+      impactEvent.power || 200  // default power if not found
     );
 
-    // We'll spawn them at the moment of impact + small offset
-    const spawnTime = impactEvent.time + 30;
+    // We'll spawn them at the moment of impact minus a small offset
+    const spawnTime = impactEvent.time - 30;
 
     // Insert them into the existing timeline
     for (const childData of childProjectiles) {
-      // We do NOT include weaponId here if we don’t want them 
-      // to trigger this same handleImpact logic recursively.
-      // But if we do want each child to also spawn more children, 
-      // we could keep weaponId. For now, we omit it:
-      // 
-      // childData.weaponId = null; 
-      // childData.weaponCode = null;
-      //
-      // However, if you want them to have normal collisions, 
-      // keep the weaponCode but set weaponId to null so 
-      // it won't re-invoke the same handleImpact.
-
+      // Prevent recursive triggering of impact handler
+      childData.weaponId = null; 
+      childData.weaponCode = null;
+      
       manager.simulateSubProjectile(childData, spawnTime, timeline);
     }
   }
 
-  /**
-   * Creates the child projectiles that spawn at impact.
-   */
   createChildProjectiles(position, playerId, parentPower) {
     const childProjectiles = [];
     const baseDirection = new THREE.Vector3(0, 1, 0);
@@ -126,31 +110,30 @@ export class MountainMercWeapon {
         projectileScale: 0.7 * (0.5 + Math.random()),
         projectileStyle: 'bomblet',
         craterSize: 80,
-        baseDamage: 50
+        baseDamage: 50,
+        // Dynamic time factor:
+        initialTimeFactor: this.childTimeFactor,  // starts at 0.33
+        timeFactorRate: this.childTimeFactorRate   // increases by 1.0 per second
       });
     }
 
     return childProjectiles;
   }
 
-  /**
-   * Broadcast final timeline and schedule turn after the last event.
-   */
   _broadcastAndScheduleTurn(gameCore, timeline) {
     // Broadcast
     this.projectileManager.io
       .to(this.projectileManager.gameId)
       .emit('fullProjectileTimeline', timeline);
-      this.projectileManager.scheduleTimeline(timeline, Date.now(), gameCore);
+    this.projectileManager.scheduleTimeline(timeline, Date.now(), gameCore);
 
-
-    // Find the final time
+    // Find the final time in the timeline
     const lastEventTime = timeline.length
       ? Math.max(...timeline.map(ev => ev.time))
       : 0;
     const totalDelay = lastEventTime + gameCore.turnChangeDelay;
 
-    // Schedule turn
+    // Schedule the next turn
     setTimeout(async () => {
       if (!(await gameCore.roundManager.checkRoundOver())) {
         gameCore.playerManager.advanceTurn();

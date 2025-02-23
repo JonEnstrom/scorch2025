@@ -86,10 +86,7 @@ export class CameraManager {
         this.projectileOffset = new THREE.Vector3(0, 100, 10);
         this.projectileRotationOffset = new THREE.Euler(-Math.PI / 4, Math.PI, 0);
         this.currentProjectile = null;
-        this.projectileLerpSpeed = 1.0;
-        this.hasReachedApex = false;
-        this.apexPosition = null;
-        this.initialProjectileHeight = null;
+        this.projectileLerpSpeed = 0.1;
 
         // We'll track the last position to approximate forward direction
         // in projectile view (since velocity is gone).
@@ -243,15 +240,16 @@ export class CameraManager {
                 this.game.doNormalView();
                 this.camera.updateProjectionMatrix();
                 this.lerpSpeed = 0.03;
+                this.rotationLerpSpeed = 0.1;
                 Object.values(this.game.playerManager.players).forEach(tank => tank.bigNameTag());
                 break;
 
             case 'projectile':
-                this.camera.fov = 90; // Wide FOV for more dramatic effect
+                this.camera.fov = 70;
                 this.game.doNormalView();
                 this.camera.updateProjectionMatrix();
-                this.lerpSpeed = 1.0; 
-                this.rotationLerpSpeed = 1.0;
+                this.lerpSpeed = 0.05; 
+                this.rotationLerpSpeed = 0.01;
                 Object.values(this.game.playerManager.players).forEach(tank => tank.bigNameTag());
                 break;
         }
@@ -339,69 +337,48 @@ export class CameraManager {
 
     updateProjectileView() {
         if (!this.currentProjectile || !this.currentProjectile.mesh) return;
-
+    
         const projMeshPos = this.currentProjectile.mesh.position;
-        const currentHeight = projMeshPos.y;
-
-        // Apex detection via height
-        if (!this.hasReachedApex) {
-            if (this.initialProjectileHeight === null) {
-                this.initialProjectileHeight = currentHeight;
-            }
-            // If current height is below the previous frame's height, 
-            // AND above initial height, that means we've passed apex
-            if (currentHeight < (this.currentProjectile.previousHeight || currentHeight) &&
-                currentHeight > this.initialProjectileHeight) {
-                this.hasReachedApex = true;
-                // Store camera's position as apex position
-                this.apexPosition = this.camera.position.clone();
-                // Store projectile position at apex
-                this.apexProjectilePosition = projMeshPos.clone();
-            }
-            // Update previous height
-            this.currentProjectile.previousHeight = currentHeight;
-        }
-
+        
         // Approximate forward vector from last position
         const forward = projMeshPos.clone().sub(this.lastProjectilePos).normalize();
         this.lastProjectilePos.copy(projMeshPos);
-
-        if (!this.hasReachedApex) {
-            // Before apex: camera follows behind & above
-            const up = new THREE.Vector3(0, 1, 0);
-            const right = new THREE.Vector3().crossVectors(forward, up).normalize();
-            const trueUp = new THREE.Vector3().crossVectors(right, forward.clone().negate()).normalize();
-            
-            const baseRotationMatrix = new THREE.Matrix4().makeBasis(right, trueUp, forward.clone().negate());
-            const offsetMatrix = new THREE.Matrix4().makeRotationFromEuler(this.projectileRotationOffset);
-            const rotationMatrix = baseRotationMatrix.multiply(offsetMatrix);
-            
-            // Position: a bit behind the projectile
-            this.targetPosition.copy(projMeshPos)
-                .add(new THREE.Vector3(0, this.projectileOffset.y, 0))
-                .sub(forward.multiplyScalar(Math.abs(this.projectileOffset.z)));
-            
-            this.targetRotation.setFromRotationMatrix(rotationMatrix);
-            this.targetLookAt.copy(projMeshPos);
-        } else {
-            // After apex: keep camera where it was at apex, look downward
-            if (this.apexPosition) {
-                this.targetPosition.copy(this.apexPosition);
-            } else {
-                // fallback in case apexPosition is missing
-                this.targetPosition.copy(this.camera.position);
-            }
-
-            // Slowly rotate downward
-            const downwardRotation = new THREE.Euler(-Math.PI / 2, 0, 0);
-            const currentRotation = new THREE.Euler().setFromQuaternion(this.camera.quaternion);
-            
-            this.targetRotation.x = THREE.MathUtils.lerp(currentRotation.x, downwardRotation.x, 0.05);
-            this.targetRotation.y = THREE.MathUtils.lerp(currentRotation.y, downwardRotation.y, 0.05);
-            this.targetRotation.z = THREE.MathUtils.lerp(currentRotation.z, downwardRotation.z, 0.05);
-
-            this.targetLookAt.copy(projMeshPos);
-        }
+        
+        // Define up vector
+        const up = new THREE.Vector3(0, 1, 0);
+        
+        // Calculate right vector (perpendicular to forward and up)
+        const right = new THREE.Vector3().crossVectors(forward, up).normalize();
+        
+        // Calculate true up vector (perpendicular to right and forward)
+        const trueUp = new THREE.Vector3().crossVectors(right, forward).normalize();
+        
+        // Set camera position: above and slightly to the side of the projectile
+        // Adjust these offset values as needed
+        const heightOffset = 200; // How high above the projectile
+        const sideOffset = 150;    // How far to the side of the projectile
+        
+        this.targetPosition.copy(projMeshPos)
+            .add(trueUp.clone().multiplyScalar(heightOffset))     // Move up
+            .add(right.clone().multiplyScalar(sideOffset));       // Move to the side
+        
+        // Create a rotation matrix that will make the camera look down at the terrain
+        // We want to look at a point slightly ahead of the projectile on the ground
+        const lookAheadDistance = 15; // How far ahead to look
+        const groundLevel = 0;        // Assuming ground is at y=0, adjust as needed
+        
+        // Calculate point to look at (ahead of projectile, at ground level)
+        this.targetLookAt.copy(projMeshPos)
+            .add(forward.clone().multiplyScalar(lookAheadDistance));
+        this.targetLookAt.y = groundLevel;
+        
+        // Set the target rotation to look at the target point
+        this.camera.lookAt(this.targetLookAt);
+        this.targetRotation.setFromQuaternion(this.camera.quaternion.clone());
+        
+        // Optional: add a slight banking effect when projectile turns
+        // const bankAmount = 0.2;
+        // this.targetRotation.z = -forward.x * right.z * bankAmount;
     }
 
     updateThirdPersonView() {

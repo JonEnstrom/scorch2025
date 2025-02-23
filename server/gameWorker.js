@@ -198,6 +198,7 @@ parentPort.on('message', (message) => {
           player.socket = socketProxy;  // Make sure socket is stored on player
           
           const handlers = {
+
             'ping': () => {
               socketProxy.emit('pong');
             },

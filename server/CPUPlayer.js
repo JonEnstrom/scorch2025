@@ -12,6 +12,10 @@ export default class CPUPlayer extends Player {
     this.maxPitch = 10;
     this.turnTimeouts = new Set(); // Track active timeouts
     this.hasFired = false; // Track if we've fired this turn
+    
+    // AI difficulty settings
+    this.perfectAim = true; // Always hit target
+    this.maxIterations = 20; // Increase iterations for better accuracy
   }
 
   // Clear all pending timeouts
@@ -47,25 +51,20 @@ export default class CPUPlayer extends Player {
     
     if (validTargets.length === 0) return null;
     
-    const [targetId, targetPlayer] = validTargets[
-      Math.floor(Math.random() * validTargets.length)
-    ];
+    // Instead of random selection, prioritize players with lower health
+    validTargets.sort((a, b) => a[1].health - b[1].health);
+    const [targetId, targetPlayer] = validTargets[0];
     
     return { targetId, targetPlayer };
   }
 
   simulateProjectile(startPos, direction, power, gameInstance) {
     // Construct the initial projectile data object.
-    // You can add/omit fields as needed. 
-    // Note that `simulateProjectiles` expects an array (since some weapons can fire multiple sub-projectiles).
     const projectilesData = [{
       startPos: startPos.clone(),
       direction: direction.clone(),
       power: power,
-      // Is this the final projectile? Typically yes for a single shot.
       isFinalProjectile: true,
-  
-      // Example defaults — adapt to your needs
       bounceCount: 0,
       doesCollide: true,
       craterSize: 20,
@@ -79,13 +78,13 @@ export default class CPUPlayer extends Player {
     }];
   
     // We'll assume "BW01" for basic weapon code, or whichever you're testing
-    const weaponId   = 'BasicWeapon';  // Some internal ID or name
-    const weaponCode = 'BW01';         // The item/weapon code
+    const weaponId = 'BasicWeapon';
+    const weaponCode = 'BW01';
   
     // Pre-simulate the entire flight.  This returns an array of timeline events.
     const timelineEvents = gameInstance.projectileManager.simulateProjectiles(
-      this.id,           // CPU player's ID
-      projectilesData,   // Our single initial projectile
+      this.id,
+      projectilesData,
       weaponId, 
       weaponCode
     );
@@ -93,7 +92,6 @@ export default class CPUPlayer extends Player {
     // Find the first impact event if it exists
     const impactEvent = timelineEvents.find(evt => evt.type === 'projectileImpact');
     if (!impactEvent) {
-      // No impact => either it timed out (projectileExpired) or something else
       return null;
     }
   
@@ -104,73 +102,115 @@ export default class CPUPlayer extends Player {
       impactEvent.position.z
     );
   
-    // Return something like the old “collision” info
     return {
       position: impactPos,
-      // You can include any other details you want:
       time: impactEvent.time,
-      // e.g. was it a helicopter hit?
       isHelicopterHit: impactEvent.isHelicopterHit || false,
-      // etc.
     };
   }
   
   calculateFiringSolution(target, gameInstance) {
     const myPos = this.getPosition();
     const targetPos = target.getPosition();
-  
-    const numTests = 10;
-    const solutions = [];
-  
-    for (let i = 0; i < numTests; i++) {
-      const pitch = this.minPitch + (Math.random() * (this.maxPitch - this.minPitch));
-      const power = this.minPower + (Math.random() * (this.maxPower - this.minPower));
-  
-      // Yaw calculation (same as before)
-      const dx = targetPos.x - myPos.x;
-      const dz = targetPos.z - myPos.z;
-      const yaw = (Math.atan2(dx, dz) * 180 / Math.PI + 360) % 360;
-  
-      // Build direction Vector3
-      const direction = new THREE.Vector3(0, 0, 1);
-      const euler = new THREE.Euler(
-        THREE.MathUtils.degToRad(pitch),
-        THREE.MathUtils.degToRad(yaw),
-        0,
-        'YXZ'
-      );
-      direction.applyEuler(euler);
-  
-      // Now call the new simulateProjectile
-      const collision = this.simulateProjectile(
-        this.getBarrelTip(),
-        direction,
-        power,
-        gameInstance
-      );
-  
-      // If we got an impact, measure how close it is to target.
-      if (collision && collision.position) {
-        const hitPos = collision.position;
-        const distanceToTarget = hitPos.distanceTo(targetPos);
-  
-        solutions.push({
-          pitch,
-          yaw,
+    
+    // Base solution with direct line to target for yaw
+    const dx = targetPos.x - myPos.x;
+    const dz = targetPos.z - myPos.z;
+    const yaw = (Math.atan2(dx, dz) * 180 / Math.PI + 360) % 360;
+    
+    // For perfect aim, we'll use a binary search approach to find the right pitch and power
+    let minPitch = this.minPitch;
+    let maxPitch = this.maxPitch;
+    let minPower = this.minPower;
+    let maxPower = this.maxPower;
+    
+    let bestSolution = null;
+    let bestDistance = Infinity;
+    
+    // Try more iterations for better accuracy
+    for (let iteration = 0; iteration < this.maxIterations; iteration++) {
+      // Try combinations of pitch and power
+      for (let i = 0; i < 5; i++) {
+        // Use weighted random within current bounds to focus on promising areas
+        let pitch, power;
+        
+        if (bestSolution) {
+          // Focus search around the best solution found so far
+          pitch = bestSolution.pitch + (Math.random() - 0.5) * (maxPitch - minPitch) * 0.5;
+          power = bestSolution.power + (Math.random() - 0.5) * (maxPower - minPower) * 0.5;
+          
+          // Keep within bounds
+          pitch = Math.max(minPitch, Math.min(maxPitch, pitch));
+          power = Math.max(minPower, Math.min(maxPower, power));
+        } else {
+          // Initial wider search
+          pitch = minPitch + Math.random() * (maxPitch - minPitch);
+          power = minPower + Math.random() * (maxPower - minPower);
+        }
+        
+        // Build direction Vector3
+        const direction = new THREE.Vector3(0, 0, 1);
+        const euler = new THREE.Euler(
+          THREE.MathUtils.degToRad(pitch),
+          THREE.MathUtils.degToRad(yaw),
+          0,
+          'YXZ'
+        );
+        direction.applyEuler(euler);
+        
+        // Simulate projectile
+        const collision = this.simulateProjectile(
+          this.getBarrelTip(),
+          direction,
           power,
-          distance: distanceToTarget,
-          collision
-        });
+          gameInstance
+        );
+        
+        // If we got an impact, measure how close it is to target
+        if (collision && collision.position) {
+          const hitPos = collision.position;
+          const distanceToTarget = hitPos.distanceTo(targetPos);
+          
+          // If this is the best solution so far, save it
+          if (distanceToTarget < bestDistance) {
+            bestDistance = distanceToTarget;
+            bestSolution = {
+              pitch,
+              yaw,
+              power,
+              distance: distanceToTarget,
+              collision
+            };
+            
+            // If we're aiming for perfect hit and this is close enough, return immediately
+            if (this.perfectAim && distanceToTarget < 10) {
+              return bestSolution;
+            }
+          }
+        }
+      }
+      
+      // Narrow the search range around the best solution
+      if (bestSolution) {
+        const rangeFactor = 0.5;
+        minPitch = Math.max(this.minPitch, bestSolution.pitch - (maxPitch - minPitch) * rangeFactor);
+        maxPitch = Math.min(this.maxPitch, bestSolution.pitch + (maxPitch - minPitch) * rangeFactor);
+        minPower = Math.max(this.minPower, bestSolution.power - (maxPower - minPower) * rangeFactor);
+        maxPower = Math.min(this.maxPower, bestSolution.power + (maxPower - minPower) * rangeFactor);
       }
     }
-  
-    // Sort results by distance to find the "best" shot
-    if (solutions.length > 0) {
-      solutions.sort((a, b) => a.distance - b.distance);
-      return solutions[0];
+    
+    // If we found a solution, return it
+    if (bestSolution) {
+      return bestSolution;
     }
-  
-    return null;
+    
+    // If all else fails, use a direct shot
+    return {
+      yaw,
+      pitch: -45,
+      power: 500
+    };
   }
   
   getAvailableWeapons() {
@@ -181,6 +221,15 @@ export default class CPUPlayer extends Player {
   getAvailableItems() {
     const itemCodes = ['LA01', 'HA02', 'RK01', 'SB02', 'EF01'];
     return itemCodes.filter(code => this.hasItem(code));
+  }
+
+  // Random weapon selection
+  selectRandomWeapon() {
+    const availableWeapons = this.getAvailableWeapons();
+    if (availableWeapons.length === 0) return null;
+    
+    // Simply return a random weapon from the available ones
+    return availableWeapons[Math.floor(Math.random() * availableWeapons.length)];
   }
 
   simulateTurn(gameInstance, userId) {
@@ -202,12 +251,14 @@ export default class CPUPlayer extends Player {
 
       let solution;
       if (!target) {
+        // No valid targets, just fire randomly
         solution = {
           yaw: Math.random() * 360,
           pitch: this.minPitch + Math.random() * (this.maxPitch - this.minPitch),
           power: this.minPower + Math.random() * (this.maxPower - this.minPower)
         };
       } else {
+        // Calculate perfect firing solution
         solution = this.calculateFiringSolution(target.targetPlayer, gameInstance);
         if (!solution) {
           solution = {
@@ -218,10 +269,10 @@ export default class CPUPlayer extends Player {
         }
       }
 
-      // Pre-select item if we're going to use one
+      // Use strategic items when appropriate
       let selectedItem = null;
       const availableItems = this.getAvailableItems();
-      if (availableItems.length > 0 && Math.random() < 0.3) {
+      if (availableItems.length > 0 && Math.random() < 0.5) { // Increased chance to use items
         selectedItem = availableItems[Math.floor(Math.random() * availableItems.length)];
         
         // First notify about item selection
@@ -241,14 +292,10 @@ export default class CPUPlayer extends Player {
         }, 2000);
       }
 
-      // Pre-select weapon
-      const availableWeapons = this.getAvailableWeapons();
-      let selectedWeapon = null;
-      if (availableWeapons.length > 0) {
-        selectedWeapon = availableWeapons[Math.floor(Math.random() * availableWeapons.length)];
-      }
+      // Select a random weapon
+      let selectedWeapon = this.selectRandomWeapon();
 
-      // Select and notify about weapon choice first
+      // Select and notify about weapon choice
       this.addTimeout(() => {
         if (selectedWeapon) {
           // Call processWeaponChange directly since we're on the server

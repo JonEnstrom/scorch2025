@@ -287,6 +287,7 @@ app.post('/create-game', (req, res) => {
 
 // Socket connection handling
 io.on('connection', async (socket) => {
+
   const cookies = socket.handshake.headers.cookie || '';
   const match = cookies.match(/playerId=([^;]+)/);
   const playerId = match ? decodeURIComponent(match[1]) : null;
@@ -324,10 +325,10 @@ io.on('connection', async (socket) => {
       name: playerData.name
     };
   }
-
   socket.emit('reconnected');
   broadcastLobbyPlayers();
   broadcastGamesList();
+
 
   // Handle joining a game
   socket.on('joinGame', (gameName, asSpectator = false) => {
@@ -339,6 +340,7 @@ io.on('connection', async (socket) => {
   
     const playerData = playerSessions.get(playerId);
     socket.join(gameName);
+
     
     // Update player-game mapping
     playerGameMapping.set(playerId, gameName);
@@ -362,6 +364,7 @@ io.on('connection', async (socket) => {
 
   // Game-specific events to forward to worker
   const gameEvents = [
+    'timeSync',
     'ping',
     'playerReady',
     'chatMessage',

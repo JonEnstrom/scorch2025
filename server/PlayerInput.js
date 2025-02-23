@@ -8,6 +8,7 @@ import ClusterWeapon from './weapons/ClusterWeapon.js';
 import { BouncingBettyWeapon } from './weapons/BouncingBetty.js';
 import BasicWeapon from './weapons/BasicWeapon.js';
 import { BouncingRabbitWeapon } from './weapons/BouncingRabbit.js';
+import { JumpingBeanWeapon } from './weapons/JumpingBean.js';
 import ArmorShieldManager from './ArmorShieldManager.js';
 
 /**
@@ -111,8 +112,11 @@ export function processInput(playerId, input, gameInstance) {
                 case 'BW01': // BasicWeapon
                     weaponInstance = new BasicWeapon(gameInstance.projectileManager);
                     break;
-                case 'MS01': // MultiShot
+                    case 'MS01': // MultiShot
                     weaponInstance = new MultiShotWeapon(gameInstance.projectileManager);
+                    break;
+                case 'JB01': // MultiShot
+                    weaponInstance = new JumpingBeanWeapon(gameInstance.projectileManager);
                     break;
                 default:
                     gameInstance.io.to(playerId).emit('errorMessage', `Unknown weapon code: ${weaponCode}`);

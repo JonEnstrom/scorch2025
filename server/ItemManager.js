@@ -96,6 +96,14 @@ export default class ItemManager {
         cost: 1250,
         icon: 'icons/cluster_shot.png'
       },
+      {
+        name: 'Jumping Bean',
+        code: 'JB01',
+        category: ITEM_CATEGORIES.WEAPON,
+        description: 'Damn Mexicans!',
+        cost: 1250,
+        icon: 'icons/cluster_shot.png'
+      },
 
       // -------------- ARMOR ---------------
       {
@@ -149,6 +157,7 @@ export default class ItemManager {
       // e.g., return a simple array of { name, quantity }
       return [
         { name: 'Poverty Shot', quantity: 1000 },
+        { name: 'Jumping Bean', quantity: 40 },
         { name: 'Pea Shooter', quantity: 12 },
         { name: 'Bouncing Betty', quantity: 12 },
         { name: 'Bouncing Rabbit', quantity: 12 },

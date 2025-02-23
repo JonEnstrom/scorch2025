@@ -17,4 +17,9 @@ export default class GameInstance extends GameCore {
     
     this.io = this.networking.io;
   }
+
+
+getCurrentTime() {
+  return Date.now() - this.gameStartTime;
+}
 }

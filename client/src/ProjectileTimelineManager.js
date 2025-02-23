@@ -2,11 +2,12 @@ import { ClientProjectile } from "./Projectile";
 import * as THREE from 'three';
 
 export class ProjectileTimelineManager {
-    constructor(game) {
+    constructor(game, helicopterManager) {
         this.game = game;              // a reference to the main Game
         this.events = [];              // sorted array of all scheduled events
         this.simulationStartTime = 0;  // time offset in ms
         this.playbackActive = false;
+        this.helicopterManager = helicopterManager;
 
         // New flag to ensure camera is only adjusted once per timeline
         this.cameraAdjustedThisTimeline = false;
@@ -53,8 +54,13 @@ export class ProjectileTimelineManager {
             case 'projectileMove':
                 this.handleProjectileMove(evt);
                 break;
-            case 'projectileImpact':
-                this.handleProjectileImpact(evt);
+                case 'projectileImpact':
+                    this.handleProjectileImpact(evt);
+                    break;
+            case 'helicopterDamage':
+                console.log(evt);
+
+                this.helicopterManager.handleHelicopterDamage(evt.helicopterId, evt.damage);
                 break;
             case 'helicopterDestroyed':
                 // Possibly show explosion or remove helicopter from scene
@@ -97,9 +103,6 @@ export class ProjectileTimelineManager {
         this.game.projectiles.push(projectile);
         this.game.projectileMap.set(evt.projectileId, projectile);
 
-        // ----------------------
-        // Camera logic (NEW)
-        // ----------------------
         // Only adjust the camera once per timeline. For instance, if weaponCode
         // is "RF01" we set the view to 'projectile'. Otherwise we set 'chase'.
         if (!this.cameraAdjustedThisTimeline) {
@@ -128,8 +131,13 @@ export class ProjectileTimelineManager {
         const newPos = new THREE.Vector3(evt.position.x, evt.position.y, evt.position.z);
         const dir = newPos.clone().sub(lastPos).normalize();
         
-        // Update orientation
-        projectile.setOrientation({ x: dir.x, y: dir.y, z: dir.z });
+        // Update the projectile's direction property
+        projectile.direction.copy(dir);
+        
+        // Only update orientation if the rotation type is set to "velocity"
+        if (projectile.rotationConfig && projectile.rotationConfig.type === 'velocity') {
+            projectile.setOrientation({ x: dir.x, y: dir.y, z: dir.z });
+        }
         
         // Update position
         projectile.setExactPosition(evt.position);
@@ -141,11 +149,13 @@ export class ProjectileTimelineManager {
     handleProjectileImpact(evt) {
         const projectile = this.game.projectileMap.get(evt.projectileId);
         if (!projectile) return;
-
-        // Trigger explosion visuals
+    
+        // Set the projectile's position to the exact impact point before explosion
+        projectile.setExactPosition(evt.position);
+        
+        // Now trigger explosion at the correct position
         projectile.triggerExplosion(evt);
-
-        // If final or we want to remove projectile:
+    
         projectile.destroy();
         this.game.projectileMap.delete(evt.projectileId);
         this.game.projectiles = this.game.projectiles.filter(p => p !== projectile);

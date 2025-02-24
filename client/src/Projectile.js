@@ -1,4 +1,3 @@
-// ClientProjectile.js
 import * as THREE from 'three';
 import { ModelCache } from './ModelCache.js';
 import { TrailEffect } from './GpuTrails.js';
@@ -31,6 +30,17 @@ class ClientProjectile {
         this.weaponId = weaponId;
         this.weaponCode = weaponCode;
 
+        // Position management
+        this.position = new THREE.Vector3(startPos.x, startPos.y, startPos.z);
+        this.currentPosition = new THREE.Vector3(startPos.x, startPos.y, startPos.z);
+        this.direction = new THREE.Vector3(direction.x, direction.y, direction.z).normalize();
+
+        // New trajectory-based properties
+        this.trajectory = [];  // Will be populated with {time, position} points
+        this.currentTrajectoryIndex = 0;
+        this.impactTime = null;
+
+        // Visual properties
         this.projectileStyle = projectileStyle;
         this.projectileScale = projectileScale || 1;
         this.explosionType = explosionType || 'normal';
@@ -43,16 +53,6 @@ class ClientProjectile {
         this.gpuParticleManager = gpuParticleManager;
         this.terrainRenderer = terrainRenderer;
 
-        // Start position
-        this.position = new THREE.Vector3(startPos.x, startPos.y, startPos.z);
-
-        // **Lerp** variables:
-        this.lerpPosition = this.position.clone();  // smoothly-updated position
-        this.lerpTarget = this.position.clone();    // target position from server
-
-        // Direction used for orientation
-        this.direction = new THREE.Vector3(direction.x, direction.y, direction.z).normalize();
-
         this.isDestroyed = false;
 
         // Visual/trail config
@@ -60,6 +60,147 @@ class ClientProjectile {
         this.setupVisuals();
     }
 
+    // New method to set the complete trajectory data
+    setTrajectory(trajectoryPoints) {
+        this.trajectory = trajectoryPoints;
+        
+        // Check if the last point is an impact point
+        const lastPoint = trajectoryPoints[trajectoryPoints.length - 1];
+        if (lastPoint.isImpact) {
+            this.impactTime = lastPoint.time;
+        }
+    }
+
+    // Cubic spline interpolation for smooth position
+    cubicInterpolate(p0, p1, p2, p3, t) {
+        const t2 = t * t;
+        const t3 = t2 * t;
+        
+        // Catmull-Rom coefficients
+        const a = -0.5 * p0 + 1.5 * p1 - 1.5 * p2 + 0.5 * p3;
+        const b = p0 - 2.5 * p1 + 2 * p2 - 0.5 * p3;
+        const c = -0.5 * p0 + 0.5 * p2;
+        const d = p1;
+        
+        return a * t3 + b * t2 + c * t + d;
+    }
+
+    // New method to update position based on current simulation time
+    updateTrajectoryPosition(currentTime) {
+        if (this.trajectory.length < 2) return;
+        
+        // Handle impact case
+        if (this.impactTime !== null && currentTime >= this.impactTime) {
+            const impactPoint = this.trajectory.find(point => point.isImpact);
+            if (impactPoint) {
+                this.currentPosition.copy(impactPoint.position);
+                this.position.copy(impactPoint.position);
+                return;
+            }
+        }
+        
+        // Find the two points around the current time
+        let index1 = 0;
+        while (index1 < this.trajectory.length - 1 && 
+               this.trajectory[index1 + 1].time <= currentTime) {
+            index1++;
+        }
+        
+        if (index1 >= this.trajectory.length - 1) {
+            // We're at or past the last position
+            this.currentPosition.copy(this.trajectory[this.trajectory.length - 1].position);
+            this.position.copy(this.currentPosition);
+            return;
+        }
+        
+        const index2 = index1 + 1;
+        const point1 = this.trajectory[index1];
+        const point2 = this.trajectory[index2];
+        
+        // Calculate normalized t value between the two points
+        const timeSpan = point2.time - point1.time;
+        const t = timeSpan > 0 ? (currentTime - point1.time) / timeSpan : 0;
+        
+        // Advanced interpolation based on available points
+        let newPosition;
+        
+        if (this.trajectory.length >= 4 && index1 >= 1 && index2 < this.trajectory.length - 1) {
+            // We have enough points for cubic interpolation
+            const point0 = this.trajectory[index1 - 1];
+            const point3 = this.trajectory[index2 + 1];
+            
+            // Interpolate each component separately
+            newPosition = new THREE.Vector3(
+                this.cubicInterpolate(
+                    point0.position.x, point1.position.x, point2.position.x, point3.position.x, t
+                ),
+                this.cubicInterpolate(
+                    point0.position.y, point1.position.y, point2.position.y, point3.position.y, t
+                ),
+                this.cubicInterpolate(
+                    point0.position.z, point1.position.z, point2.position.z, point3.position.z, t
+                )
+            );
+        } else {
+            // Fall back to simple linear interpolation
+            newPosition = new THREE.Vector3().copy(point1.position).lerp(point2.position, t);
+        }
+        
+        // Store the previous position for direction calculation
+        const prevPosition = this.position.clone();
+        
+        // Update positions
+        this.currentPosition.copy(newPosition);
+        this.position.copy(newPosition);
+        
+        // Update direction for orientation
+        const moveDelta = new THREE.Vector3().copy(this.position).sub(prevPosition);
+        if (moveDelta.lengthSq() > 0.00001) { // Only update if there's meaningful movement
+            this.direction.copy(moveDelta).normalize();
+            if (this.rotationConfig && this.rotationConfig.type === 'velocity') {
+                this.setOrientation(this.direction);
+            }
+        }
+        
+        // Update mesh position
+        const activeMesh = this.mesh || this.tempMesh;
+        if (activeMesh) {
+            activeMesh.position.copy(this.position);
+            
+            // Handle constant rotation if configured
+            if (this.rotationConfig && this.rotationConfig.type === 'constant') {
+                const deltaTime = (point2.time - point1.time) / 1000 * t; // Convert to seconds
+                const rotationAmount = THREE.MathUtils.degToRad(
+                    this.rotationConfig.rotationSpeed
+                ) * deltaTime;
+                activeMesh.rotateOnAxis(this.rotationConfig.rotationAxis, rotationAmount);
+            }
+        }
+        
+        // Update trail position
+        if (TRAILS && this.trailEffect) {
+            this.trailEffect.updatePosition(this.trailConfig.trailId, this.position);
+            this.trailEffect.updateDirection(this.trailConfig.trailId, this.direction);
+        }
+    }
+    
+    // The original updateVisual method is replaced by updateTrajectoryPosition
+    updateVisual(deltaTime) {
+        // This method is now just a compatibility layer
+        // All the actual positioning is done in updateTrajectoryPosition
+        
+        if (this.isDestroyed) return;
+        
+        // If we're using rotation animation that isn't direction-based
+        const activeMesh = this.mesh || this.tempMesh;
+        if (activeMesh && this.rotationConfig && this.rotationConfig.type === 'constant') {
+            const rotationAmount = THREE.MathUtils.degToRad(
+                this.rotationConfig.rotationSpeed
+            ) * deltaTime;
+            activeMesh.rotateOnAxis(this.rotationConfig.rotationAxis, rotationAmount);
+        }
+    }
+    
     setOrientation(direction) {
         // direction is either a plain { x, y, z } object or a THREE.Vector3
         const forward = new THREE.Vector3(direction.x, direction.y, direction.z).normalize();
@@ -118,6 +259,19 @@ class ClientProjectile {
                     type: 'constant',
                     rotationAxis: new THREE.Vector3(0.3, 1, 0).normalize(),
                     rotationSpeed: 200
+                }
+            },
+            spike_bomb: {
+                tempMeshColor: 0xaaaaaa,
+                trailConfig: {
+                    trailType: 'basic',
+                    trailSize: 1,
+                    emitRate: 50
+                },
+                rotation: {
+                    type: 'constant',
+                    rotationAxis: new THREE.Vector3(0.3, 1, 0).normalize(),
+                    rotationSpeed: 50
                 }
             },
             default: {
@@ -195,50 +349,6 @@ class ClientProjectile {
         }
     }
 
-    /**
-     * Called by ProjectileTimelineManager or by the client
-     * to update the "target" position from the server.
-     */
-    setExactPosition(newPos) {
-        // Instead of snapping, we store it as our 'lerpTarget'
-        this.lerpTarget.set(newPos.x, newPos.y, newPos.z);
-    }
-
-    /**
-     * Smoother interpolation in updateVisual.
-     */
-    updateVisual(deltaTime) {
-        if (this.isDestroyed) return;
-
-        // Lerp from current 'lerpPosition' to 'lerpTarget'
-        // e.g. factor = 10 * deltaTime means we try to "reach" the target in ~0.1s
-        const lerpFactor = 3 * deltaTime;
-        this.lerpPosition.lerp(this.lerpTarget, lerpFactor);
-
-        // Update the actual mesh to the 'lerpPosition'
-        const activeMesh = this.mesh || this.tempMesh;
-        if (activeMesh) {
-            activeMesh.position.copy(this.lerpPosition);
-
-            // If rotation type is 'constant', we spin it
-            if (this.rotationConfig.type === 'constant') {
-                const rotationAmount = THREE.MathUtils.degToRad(this.rotationConfig.rotationSpeed) * deltaTime;
-                activeMesh.rotateOnAxis(this.rotationConfig.rotationAxis, rotationAmount);
-            }
-            // If rotation type is 'velocity', you might do setOrientation(this.direction)
-            // if you have an updated direction from the timeline.
-        }
-
-        // For convenience, also keep this.position in sync (if other code references it)
-        this.position.copy(this.lerpPosition);
-
-        // Update trails
-        if (TRAILS && this.trailEffect) {
-            this.trailEffect.updatePosition(this.trailConfig.trailId, this.position);
-            this.trailEffect.updateDirection(this.trailConfig.trailId, this.direction);
-        }
-    }
-
     triggerExplosion(impactEvent) {
         const explosionEffect = new GPUExplosionEffect(this.gpuParticleManager);
         explosionEffect.createBasicExplosion({
@@ -250,7 +360,7 @@ class ClientProjectile {
 
         // Deform terrain (client-side effect)
         this.terrainRenderer.scorchSystem.applyScorch(this.position, this.explosionSize * 25, 0.2);
-        this.terrainRenderer.queueTerrainModification(this.position.x, this.position.z, this.craterSize, 'crater');
+        //this.terrainRenderer.queueTerrainModification(this.position.x, this.position.z, this.craterSize, 'crater');
         if (this.isFinalProjectile) {
             this.terrainRenderer.updateNormals();
         }
@@ -293,6 +403,7 @@ class ClientProjectile {
             this.trailEffect.stopTrail(this.trailConfig.trailId);
         }
 
+        this.trajectory = null;
         this.scene = null;
         this.gpuParticleManager = null;
         this.terrainRenderer = null;

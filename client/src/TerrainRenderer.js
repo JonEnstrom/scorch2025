@@ -12,7 +12,7 @@ export class TerrainRenderer {
     
     this.geometry = null;
     this.modificationQueue = [];
-    this.modificationInterval = 10; // e.g. 1 call every 100ms
+    this.modificationInterval = 20; // e.g. 1 call every 100ms
     this.lastModificationTime = 0;
 
     this.material = null;
@@ -502,7 +502,7 @@ export class TerrainRenderer {
               const blendFactor = distance > radius*0.5 
                 ? 1.0 - (distance - radius*0.5)/(radius*0.5)
                 : 1.0;
-              newHeight -= 40 * blendFactor * (distance <= radius*0.5 ? 1 : blendFactor);
+              newHeight -= radius * blendFactor * (distance <= radius*0.5 ? 1 : blendFactor);
             }
             break;
         }

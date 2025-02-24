@@ -10,6 +10,7 @@ export default class Player {
         this.maxHealth = 100;
         this.health = 100;
         this.armor = 0;
+        this.hasShield = false;
         this.shield = 0;
         this.name = "Unknown";  
         this.color = null;
@@ -224,7 +225,7 @@ export default class Player {
     resetForNewRound() {
         this.isAlive = true;
          this.health = 100;
-         this.ammor = 0;
+         this.armor = 0;
          this.shield = 0;
          this.turretPitch = -45;
          this.power = 200;

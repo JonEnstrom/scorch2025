@@ -43,7 +43,8 @@ export default class GameCore {
       this.networking.io,
       this.gameId,
       this.terrainManager,
-      this.helicopterManager
+      this.playerManager,
+      ArmorShieldManager,
     );
     this.helicopterManager.projectileManager = this.projectileManager;
         this.roundManager = new RoundManager(this, totalRounds);
@@ -59,9 +60,6 @@ export default class GameCore {
     this.lastPlayerLeftTime = null;
 
     // Initialize game
-    this.projectileManager.setImpactHandler((impactEvent) => {
-      this.handleProjectileImpact(impactEvent);
-    });
 
     // CPU Players get added to the game AFTER the first human player joins.
     this.cpuPlayersAdded = false;
@@ -427,62 +425,15 @@ export default class GameCore {
     this.networking.io.to(this.gameId).emit('addShield', playerId);
   }
 
+  removeShieldFromPlayer(playerId) {
+    this.networking.io.to(this.gameId).emit('removeShield', playerId);
+  }
+
   broadcastRoundStartingSoon(currentRound, totalRounds) {
     if (this._isDestroyed) return;
     this.networking.broadcastRoundStartingSoon(currentRound, totalRounds);
   }
-
-  handleProjectileImpact(impactEvent) {
-    if (this._isDestroyed) {
-      return;
-    }
   
-    // If this wasn't a helicopter hit, handle terrain & area damage.
-    if (!impactEvent.isHelicopterHit) {
-      const patch = this.terrainManager.modifyTerrain(
-        impactEvent.position.x,
-        impactEvent.position.z,
-        impactEvent.craterSize,
-        'crater'
-      );
-  
-      const allPlayers = this.playerManager.getPlayersObject();
-      for (const [userId, player] of Object.entries(allPlayers)) {
-        if (!player.isAlive) continue;
-  
-        const playerPos = player.getPosition();
-        const dx = playerPos.x - impactEvent.position.x;
-        const dz = playerPos.z - impactEvent.position.z;
-        const distance = Math.sqrt(dx * dx + dz * dz);
-  
-        // Area-of-effect damage
-        if (distance < impactEvent.aoeSize) {
-          const falloffPercent = (distance / impactEvent.aoeSize) * 0.5;
-          const damageMultiplier = 1 - falloffPercent;
-          const damage = Math.round(impactEvent.damage * damageMultiplier);
-  
-          // Changed from this.ArmorShieldManager to ArmorShieldManager
-          const damageResult = ArmorShieldManager.applyDamage(player, damage);
-  
-          this.networking.io.to(this.gameId).emit('playerDamaged', {
-            id: userId,
-            damage: damage,
-            damageDistribution: damageResult,
-            currentHealth: player.getHealth()
-          });
-  
-          if (player.getHealth() <= 0) {
-            player.isAlive = false;
-            this.networking.io.to(this.gameId).emit('playerDefeated', { id: userId });
-          }
-          this.networking.io.to(this.gameId).emit('playerListUpdated', this.playerManager.getAllPlayers());
-        }
-      }
-  
-      // Re-adjust any players that might be standing where terrain changed.
-      this.playerManager.adjustPositionsToTerrain();
-    }
-  }
 
   isFull() {
     const nonSpectatorCount = Object.values(this.playerManager.players)

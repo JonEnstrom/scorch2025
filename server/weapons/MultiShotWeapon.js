@@ -52,9 +52,6 @@ export default class MultiShotWeapon {
         craterSize: 30,
         baseDamage: 20,
         explosionSize: 1,
-
-        // If you want the default collision logic,
-        // you can keep weaponId/weaponCode here or omit:
         weaponId: this.id,
         weaponCode: this.weaponCode
       };
@@ -67,8 +64,6 @@ export default class MultiShotWeapon {
       );
     }
 
-    // Once we've inserted all shots, 
-    // we broadcast the timeline and schedule turn
     this._broadcastAndScheduleTurn(gameCore, timeline);
   }
 

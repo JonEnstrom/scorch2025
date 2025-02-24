@@ -21,7 +21,7 @@ export const GamePhase = {
      * @param {number} shoppingDuration - Duration of shopping phase in ms
      * @param {number} startDelay - Delay before starting round after announcement
      */
-    constructor(gameInstance, totalRounds = 3, shoppingDuration = 1000, startDelay = 1000) {
+    constructor(gameInstance, totalRounds = 3, shoppingDuration = 2000, startDelay = 1000) {
       this.gameInstance = gameInstance;
       this.totalRounds = totalRounds;
       this.currentRound = 0; // Start at 0, increment when starting new round

@@ -278,7 +278,16 @@ export class Game extends EventEmitter {
             if (player) {
                 player.setShield(data.totalShield);
                 this.shieldManager.addShield(player.mesh);
-                console.log(`Shield added to ${player.name}: +${data.amount}, total shield: ${data.totalShield}`);
+            } else {
+                console.warn(`Player with id ${data.playerId} not found.`);
+            }
+        });
+
+        this.socket.on('removeShield', data => {
+            console.log(data);
+            const player = this.playerManager.getPlayer(data.playerId);
+            if (player) {
+                this.shieldManager.removeShield(player.mesh);
             } else {
                 console.warn(`Player with id ${data.playerId} not found.`);
             }
@@ -288,7 +297,6 @@ export class Game extends EventEmitter {
             const player = this.playerManager.getPlayer(data.playerId);
             if (player) {
                 player.setArmor(data.totalArmor);
-                console.log(`Armor added to ${player.name}: +${data.amount}, total armor: ${data.totalArmor}`);
             } else {
                 console.warn('Local player not found.');
             }

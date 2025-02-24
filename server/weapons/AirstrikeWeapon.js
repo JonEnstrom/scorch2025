@@ -16,8 +16,8 @@ export default class AirStrikeWeapon {
     this.spreadAngle = Math.PI / 3; // random horizontal spread ±30°
     this.selfDestructDelay = 1000; // ms after last bomblet to self-destruct
     
-    // Physics settings - slower carrier (0.5 = half speed)
-    this.carrierTimeFactor = 3.0; 
+    
+    this.carrierTimeFactor = 2.0; 
     this.bombletTimeFactor = 1.0; // Normal speed for bomblets
     
     // Register the weapon logic
@@ -105,6 +105,8 @@ export default class AirStrikeWeapon {
   
         const bombData = {
           playerId,
+          preImpactBounces: 1,
+          preImpactBouncePower: 50,
           weaponId: this.id,
           weaponCode: this.weaponCode + '_BOMBLET',
           startPos: bombSpawnPos,

@@ -27,6 +27,7 @@ export default class BasicWeapon {
       isFinalProjectile: true,
       baseDamage: 20,
       craterSize: 30,
+      timeFactor: 0.7,
       // etc
     }];
   

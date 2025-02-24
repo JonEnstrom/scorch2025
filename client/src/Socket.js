@@ -146,9 +146,6 @@ const setupCombatEvents = () => {
         'fullProjectileTimeline': (timelineData) => {
             game.handleFullProjectileTimeline(timelineData);
         },
-        'projectileImpact': (impactData) => {
-            game.handleProjectileImpact(impactData);
-        },
     };
 
     Object.entries(projectileEvents).forEach(([event, handler]) => {

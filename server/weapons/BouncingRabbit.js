@@ -8,9 +8,14 @@ export class BouncingRabbitWeapon {
     this.weaponCode = 'BR01';
     
     this.maxBounces = 4;
-    this.bounceAngle = Math.PI / 2;
-    this.spreadVariance = 0.8;
+    this.spreadVariance = 0.6; // Slightly reduced for more predictable bounces
     this.powerRetention = 0.8;
+    this.bounciness = 0.85; // Coefficient of restitution (0-1)
+    
+    // Physics settings
+    this.upwardBias = 0.4; // Amount to bias the bounce upward
+    this.minVerticalVelocity = 0.5; // Minimum vertical component after bounce
+    
     this.baseFireDirection = null;
     this.maxTotalProjectiles = 27; // 3^3 splits
     this.currentProjectileCount = 0;
@@ -102,18 +107,31 @@ export class BouncingRabbitWeapon {
     const nextSplitCount = this.currentProjectileCount * 3;
     const isFinalSplit = nextSplitCount >= this.maxTotalProjectiles;
 
-    // We’ll default to 250 if no power is found in the event
+    // We'll default to 250 if no power is found in the event
     const parentPower = impactEvent.power || 250;
+    
+    // Check if we have normal data, if not use default values
+    const hasNormalData = impactEvent.surfaceNormal && impactEvent.incomingDirection;
+    
+    // Create default values if needed
+    const incomingDirection = hasNormalData ? 
+      impactEvent.incomingDirection : 
+      { x: 0, y: -1, z: 0 }; // Default to straight down
+      
+    const surfaceNormal = hasNormalData ? 
+      impactEvent.surfaceNormal : 
+      { x: 0, y: 1, z: 0 };  // Default to straight up
 
-    // Create multiple sub-projectiles (splits)
-    // This example spawns 5 slightly different directions
+    // Create multiple sub-projectiles (splits) using the surface normal
     const nextProjectiles = [
       this.createBounceProjectile(
         impactEvent.position,
         impactEvent.playerId,
         currentBounce + 1,
         parentPower,
-        -0.4,
+        incomingDirection,
+        surfaceNormal,
+        0.0, // No additional spread for center projectile
         false
       ),
       this.createBounceProjectile(
@@ -121,7 +139,9 @@ export class BouncingRabbitWeapon {
         impactEvent.playerId,
         currentBounce + 1,
         parentPower,
-        0.0,
+        incomingDirection,
+        surfaceNormal,
+        -0.8, // Left spread
         false
       ),
       this.createBounceProjectile(
@@ -129,23 +149,9 @@ export class BouncingRabbitWeapon {
         impactEvent.playerId,
         currentBounce + 1,
         parentPower,
-        0.4,
-        isFinalSplit
-      ),
-      this.createBounceProjectile(
-        impactEvent.position,
-        impactEvent.playerId,
-        currentBounce + 1,
-        parentPower,
-        -0.8,
-        false
-      ),
-      this.createBounceProjectile(
-        impactEvent.position,
-        impactEvent.playerId,
-        currentBounce + 1,
-        parentPower,
-        0.8,
+        incomingDirection,
+        surfaceNormal,
+        0.8, // Right spread
         isFinalSplit
       )
     ];
@@ -153,7 +159,7 @@ export class BouncingRabbitWeapon {
     this.currentProjectileCount = nextSplitCount;
 
     // We spawn them slightly after the impact
-    const spawnTime = impactEvent.time + 30;
+    const spawnTime = impactEvent.time;
 
     for (const p of nextProjectiles) {
       // If final, we effectively stop further bounces
@@ -166,25 +172,46 @@ export class BouncingRabbitWeapon {
   }
 
   /**
-   * Utility to create a new bounce projectile
+   * Create a bounce projectile using physics-based reflection
    */
-  createBounceProjectile(position, playerId, bounceCount, parentPower, spreadDirection = 0, isFinal = false) {
-    const bounceDirection = this.baseFireDirection.clone();
+  createBounceProjectile(position, playerId, bounceCount, parentPower, incomingDir, surfaceNormal, spreadFactor = 0, isFinal = false) {
+    // Convert direction and normal to THREE.Vector3
+    const incDir = new THREE.Vector3(incomingDir.x, incomingDir.y, incomingDir.z);
+    const normal = new THREE.Vector3(surfaceNormal.x, surfaceNormal.y, surfaceNormal.z);
+    
+    // Calculate reflection using physics formula: R = V - 2(V·N)N
+    const dot = incDir.dot(normal);
+    const bounceDir = new THREE.Vector3().copy(incDir).sub(
+      normal.clone().multiplyScalar(2 * dot)
+    );
+    
+    // Apply bounciness (energy retention)
+    bounceDir.normalize().multiplyScalar(this.bounciness);
+    
+    // Add upward bias to prevent rolling along the ground
+    // We increase this bias for later bounces to create a more interesting pattern
+    bounceDir.y += this.upwardBias * (1 + bounceCount * 0.15);
+    
+    // Ensure minimum vertical component
+    if (bounceDir.y < this.minVerticalVelocity) {
+      bounceDir.y = this.minVerticalVelocity;
+      bounceDir.normalize();
+    }
 
-    // Force some upward bounce
-    const upwardComponent = Math.sin(this.bounceAngle);
-    bounceDirection.y = upwardComponent;
-
-    // Add sideways variance
-    const rightVector = new THREE.Vector3(0, 1, 0)
-      .cross(bounceDirection)
-      .normalize();
-    const sideVariance = spreadDirection * this.spreadVariance;
-    bounceDirection.add(rightVector.multiplyScalar(sideVariance));
-
-    // Random small rotation
-    const rotationAngle = (Math.random() - 0.5) * this.spreadVariance;
-    bounceDirection.applyAxisAngle(new THREE.Vector3(0, 1, 0), rotationAngle);
+    // Add spread perpendicular to bounce direction
+    // This creates the split projectile effect
+    if (spreadFactor !== 0) {
+      // Find perpendicular vector (cross product with up vector)
+      const rightVector = new THREE.Vector3(0, 1, 0).cross(bounceDir).normalize();
+      bounceDir.add(rightVector.multiplyScalar(spreadFactor * this.spreadVariance));
+      
+      // Add slight random variation
+      const randomAngle = (Math.random() - 0.5) * 0.3; // Small random angle
+      bounceDir.applyAxisAngle(new THREE.Vector3(0, 1, 0), randomAngle);
+    }
+    
+    // Normalize direction vector
+    bounceDir.normalize();
 
     // Degrade power with each bounce
     const bouncePower = parentPower * Math.pow(this.powerRetention, bounceCount);
@@ -192,10 +219,11 @@ export class BouncingRabbitWeapon {
     return {
       startPos: new THREE.Vector3(
         position.x,
-        position.y + 0.1,
+        position.y + 2.0, // Start slightly higher to prevent immediate re-collision
         position.z
       ),
-      direction: bounceDirection.normalize(),
+      timeFactor: 0.8,
+      direction: bounceDir,
       power: bouncePower,
       isFinalProjectile: isFinal,
       explosionType: 'normal',

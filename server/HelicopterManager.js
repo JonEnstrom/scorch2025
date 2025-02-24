@@ -249,11 +249,10 @@ export default class HelicopterManager {
     this.lastSpawnTime = 0;
     this.currentPlanIndex = 0;
 
-    // Check for new spawns every second.
-    setInterval(this.checkSpawn.bind(this), 1000);
-    
+    this.spawnCheckInterval = setInterval(this.checkSpawn.bind(this), 1000);
     this.pathUpdateInterval = 20000;
-    setInterval(this.updateAllHelicopterPaths.bind(this), this.pathUpdateInterval);
+    this.pathUpdateIntervalId = setInterval(this.updateAllHelicopterPaths.bind(this), this.pathUpdateInterval);
+
   }
 
   checkSpawn() {
@@ -344,6 +343,11 @@ export default class HelicopterManager {
   }
 
   destroy() {
+    // Clear the intervals
+    clearInterval(this.spawnCheckInterval);
+    clearInterval(this.pathUpdateIntervalId);
+    
+    // Destroy all helicopters
     for (const helicopter of this.helicopters.values()) {
       this.io.to(this.gameId).emit('helicopterDestroyed', { id: helicopter.id });
     }

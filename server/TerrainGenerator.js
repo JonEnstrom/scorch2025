@@ -306,15 +306,13 @@ export default class TerrainGenerator {
             break;
           }
           case 'crater': {
-            const blendFactor =
-              distance > radius * 0.5
-                ? 1.0 - (distance - radius * 0.5) / (radius * 0.5)
+            if (radius > 0) {
+              const blendFactor = distance > radius*0.5 
+                ? 1.0 - (distance - radius*0.5)/(radius*0.5)
                 : 1.0;
-            const craterDepth = 40 * blendFactor;
-            newHeight =
-              currentHeight -
-              (distance <= radius * 0.5 ? craterDepth : craterDepth * blendFactor);
+              newHeight -= radius * blendFactor * (distance <= radius*0.5 ? 1 : blendFactor);
             break;
+            }
           }
         }
         if (Math.abs(newHeight - currentHeight) > 0.001) {
@@ -348,6 +346,92 @@ export default class TerrainGenerator {
   getHeight(x, z) {
     const index = z * (this.segments + 1) + x;
     return this.heightData[index];
+  }
+
+  getHeightAtPositionBicubic(x, z) {
+    // Clamp world coordinates to terrain bounds
+    x = Math.max(-this.width / 2, Math.min(this.width / 2, x));
+    z = Math.max(-this.depth / 2, Math.min(this.depth / 2, z));
+  
+    // Convert world coordinates to grid coordinates
+    const gridX = this.worldToGrid(x, 'x');
+    const gridZ = this.worldToGrid(z, 'z');
+  
+    // Get the central grid cell
+    const xCenter = Math.floor(gridX);
+    const zCenter = Math.floor(gridZ);
+    
+    // Compute fractional position within the central cell
+    const fx = gridX - xCenter;
+    const fz = gridZ - zCenter;
+  
+    // Create 9x9 grid of samples
+    // We'll use a 4x4 grid for each cubic interpolation, which needs 16 samples
+    // The samples will be centered around the target position
+    const radius = 4; // How many grid cells in each direction from center
+    const samples = [];
+    
+    // Collect the height samples in a 9x9 grid
+    for (let zi = -radius; zi <= radius; zi++) {
+      const row = [];
+      for (let xi = -radius; xi <= radius; xi++) {
+        // Calculate grid coordinates with clamping
+        const sampleX = Math.max(0, Math.min(this.segments, xCenter + xi));
+        const sampleZ = Math.max(0, Math.min(this.segments, zCenter + zi));
+        
+        // Get height at this grid point
+        row.push(this.getHeight(sampleX, sampleZ));
+      }
+      samples.push(row);
+    }
+  
+    // Use central 4x4 grid for the actual interpolation
+    // The 9x9 grid ensures we have enough samples for edge cases
+    const startX = radius - 1;
+    const startZ = radius - 1;
+    
+    // Now perform bicubic interpolation
+    return this.bicubicInterpolate(samples, startX, startZ, fx, fz);
+  }
+  
+  // Helper function to evaluate the cubic basis functions
+  cubicBasis(t) {
+    // Catmull-Rom spline basis functions
+    const t2 = t * t;
+    const t3 = t2 * t;
+    
+    const v0 = -0.5 * t3 + t2 - 0.5 * t;     // b(t) = -0.5t³ + t² - 0.5t
+    const v1 = 1.5 * t3 - 2.5 * t2 + 1.0;    // b(t) = 1.5t³ - 2.5t² + 1.0
+    const v2 = -1.5 * t3 + 2.0 * t2 + 0.5 * t; // b(t) = -1.5t³ + 2.0t² + 0.5t
+    const v3 = 0.5 * t3 - 0.5 * t2;          // b(t) = 0.5t³ - 0.5t²
+    
+    return [v0, v1, v2, v3];
+  }
+  
+  // Function to perform bicubic interpolation using a 4x4 grid
+  bicubicInterpolate(samples, startX, startZ, fx, fz) {
+    // Get the cubic basis coefficients for x and z
+    const [x0, x1, x2, x3] = this.cubicBasis(fx);
+    const [z0, z1, z2, z3] = this.cubicBasis(fz);
+    
+    let height = 0;
+    
+    // Use 4x4 samples centered around our point of interest
+    for (let i = 0; i < 4; i++) {
+      for (let j = 0; j < 4; j++) {
+        // Sample from our 9x9 grid, offset by startX and startZ to center on our point
+        const sample = samples[startZ + i][startX + j];
+        
+        // Apply cubic weighting in both dimensions
+        const xWeight = (j === 0) ? x0 : (j === 1) ? x1 : (j === 2) ? x2 : x3;
+        const zWeight = (i === 0) ? z0 : (i === 1) ? z1 : (i === 2) ? z2 : z3;
+        
+        // Add weighted contribution to the final height
+        height += sample * xWeight * zWeight;
+      }
+    }
+    
+    return height;
   }
 
   getHeightAtPosition(x, z) {

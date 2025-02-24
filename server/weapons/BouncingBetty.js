@@ -1,4 +1,4 @@
-// Updated BouncingBettyWeapon.js with time-based physics and more upward trajectory
+// Updated BouncingBettyWeapon.js with normal-based bouncing
 import { v4 as uuidv4 } from 'uuid';
 import * as THREE from 'three';
 
@@ -9,17 +9,19 @@ export class BouncingBettyWeapon {
     this.weaponCode = 'BB01';
     
     this.maxBounces = 4;
-    // Increased bounce angle for more upward trajectory (from PI/2 to 2PI/3)
-    this.bounceAngle = (2 * Math.PI) / 3;
-    this.spreadVariance = 0.4;
+    this.spreadVariance = 0.2; // Reduced for more predictable bounces
     this.powerRetention = 0.8;
+    this.bounciness = 0.85; // Coefficient of restitution (0-1)
     
-    // Physics settings - faster projectile (0.5 = twice as fast)
+    // Physics settings
     this.timeFactor = 0.9;
-    this.bounceTimeFactor = 0.3; 
+    this.bounceTimeFactor = 0.6; 
     
-    // Minimum upward component to ensure strong upward trajectory
-    this.minUpwardComponent = 0.7;
+    // Upward bias to ensure projectiles don't just roll along the ground
+    this.upwardBias = 0.3; // Amount to bias the bounce upward
+    
+    // Minimum vertical velocity component after bounce
+    this.minVerticalVelocity = 0.4;
 
     // The "carrier" direction is stored at fire time
     this.baseFireDirection = null;
@@ -94,12 +96,26 @@ export class BouncingBettyWeapon {
       return;
     }
 
-    // Create next bounce projectile data
+    // Check if we have normal data, if not use default values
+    const hasNormalData = impactData.surfaceNormal && impactData.incomingDirection;
+    
+    // Create default values if needed
+    const incomingDirection = hasNormalData ? 
+      impactData.incomingDirection : 
+      { x: 0, y: -1, z: 0 }; // Default to straight down
+      
+    const surfaceNormal = hasNormalData ? 
+      impactData.surfaceNormal : 
+      { x: 0, y: 1, z: 0 };  // Default to straight up
+    
+    // Create next bounce projectile using surface normal
     const nextBounce = this.createBounceProjectile(
       impactData.position,
       impactData.playerId,
       currentBounce + 1,
-      200  // or if you stored the parent's power in a custom field
+      200,  // Base power
+      incomingDirection,
+      surfaceNormal
     );
     
     const spawnTime = impactData.time;
@@ -108,60 +124,70 @@ export class BouncingBettyWeapon {
     manager.simulateSubProjectile(nextBounce, spawnTime, timeline);
   }
 
-  createBounceProjectile(position, playerId, bounceCount, parentPower) {
-    // Start with a new direction that has strong upward component
-    const bounceDir = new THREE.Vector3();
+  createBounceProjectile(position, playerId, bounceCount, parentPower, incomingDir, surfaceNormal) {
+    // Convert direction and normal to THREE.Vector3
+    const incDir = new THREE.Vector3(incomingDir.x, incomingDir.y, incomingDir.z);
+    const normal = new THREE.Vector3(surfaceNormal.x, surfaceNormal.y, surfaceNormal.z);
     
-    // Use horizontal component from original direction but reduced
-    if (this.baseFireDirection) {
-      // Copy x and z components (horizontal) from base direction, but scaled down
-      bounceDir.x = this.baseFireDirection.x * 0.6; 
-      bounceDir.z = this.baseFireDirection.z * 0.6;
-    } else {
-      // Generate a random horizontal direction if no base direction exists
-      const randomAngle = Math.random() * Math.PI * 2;
-      bounceDir.x = Math.cos(randomAngle) * 0.3; // Reduced horizontal component
-      bounceDir.z = Math.sin(randomAngle) * 0.3;
+    // Calculate reflection using physics formula: R = V - 2(V·N)N
+    const dot = incDir.dot(normal);
+    const bounceDir = new THREE.Vector3().copy(incDir).sub(
+      normal.clone().multiplyScalar(2 * dot)
+    );
+    
+    // Apply bounciness (energy retention)
+    bounceDir.normalize().multiplyScalar(this.bounciness);
+    
+    // Add upward bias to prevent rolling along the ground
+    bounceDir.y += this.upwardBias * (1 + bounceCount * 0.1); // Increase upward bias with each bounce
+    
+    // Ensure minimum vertical component
+    if (bounceDir.y < this.minVerticalVelocity) {
+      bounceDir.y = this.minVerticalVelocity;
+      bounceDir.normalize();
     }
 
-    // Set strong upward component - increases with each bounce
-    const upwardComponent = Math.max(
-      this.minUpwardComponent + (bounceCount * 0.05),  // Increase upward trajectory with each bounce
-      Math.sin(this.bounceAngle)
-    );
-    bounceDir.y = upwardComponent;
-
-    // Add random side variance
+    // Add random variance (reduced with each bounce for more predictable late bounces)
+    const varianceFactor = Math.max(0, this.spreadVariance - (bounceCount * 0.05));
+    
+    // Add spread in random direction perpendicular to bounce
     const rightVector = new THREE.Vector3(0, 1, 0).cross(bounceDir).normalize();
-    const sideVariance = (Math.random() - 0.5) * 2 * this.spreadVariance;
-    bounceDir.add(rightVector.multiplyScalar(sideVariance));
-
-    // Small rotation around vertical axis
-    const rotationAngle = (Math.random() - 0.5) * this.spreadVariance;
-    bounceDir.applyAxisAngle(new THREE.Vector3(0, 1, 0), rotationAngle);
-
+    const upVector = new THREE.Vector3().crossVectors(bounceDir, rightVector).normalize();
+    
+    // Apply random spread in right and up directions
+    const rightSpread = (Math.random() - 0.5) * 2 * varianceFactor;
+    const upSpread = (Math.random() - 0.5) * 2 * varianceFactor;
+    
+    bounceDir.add(
+      rightVector.multiplyScalar(rightSpread)
+    ).add(
+      upVector.multiplyScalar(upSpread)
+    );
+    
     // Normalize direction vector
     bounceDir.normalize();
 
-    // Increase power for higher bounces
-    const powerMultiplier = 1 + (bounceCount * 0.1); // Power increases with each bounce
-    const bouncePower = parentPower * Math.pow(this.powerRetention, bounceCount) * powerMultiplier;
+    // Calculate power retention that decreases with each bounce
+    const bouncePower = parentPower * Math.pow(this.powerRetention, bounceCount);
 
     // Calculate a time factor that decreases with each bounce
-    // But still keeps bounces faster than normal
     const bounceTimeFact = this.bounceTimeFactor * Math.pow(0.95, bounceCount);
     
     return {
       playerId,
       weaponId: this.id,
       weaponCode: this.weaponCode,
-      startPos: new THREE.Vector3(position.x, position.y + 3.0, position.z), // Start much higher to clear recently deformed terrain
+      startPos: new THREE.Vector3(
+        position.x, 
+        position.y + 2.0, // Start slightly above impact to avoid immediate re-collision
+        position.z
+      ), 
       direction: bounceDir,
       power: bouncePower,
       isFinalProjectile: (bounceCount === this.maxBounces),
       explosionType: 'normal',
       explosionSize: 2,
-      projectileScale: Math.max(1.0 - (bounceCount * 0.2), 0.25),
+      projectileScale: Math.max(1.0 - (bounceCount * 0.1), 0.25),
       projectileStyle: 'missile',
       bounceCount,
       craterSize: 50,

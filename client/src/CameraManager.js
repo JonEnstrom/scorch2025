@@ -36,7 +36,7 @@ export class CameraManager {
         this.targetRotation = new THREE.Euler(0, 0, 0, 'XYZ');
         this.targetLookAt = new THREE.Vector3();
         this.lerpSpeed = 0.2;
-        this.rotationLerpSpeed = 0.1;
+        this.rotationLerpSpeed = 0.03;
         this.currentLookAt = new THREE.Vector3();
 
         // --------------------
@@ -86,7 +86,7 @@ export class CameraManager {
         this.projectileOffset = new THREE.Vector3(0, 100, 10);
         this.projectileRotationOffset = new THREE.Euler(-Math.PI / 4, Math.PI, 0);
         this.currentProjectile = null;
-        this.projectileLerpSpeed = 0.1;
+        this.projectileLerpSpeed = 0.03;
 
         // We'll track the last position to approximate forward direction
         // in projectile view (since velocity is gone).
@@ -240,7 +240,7 @@ export class CameraManager {
                 this.game.doNormalView();
                 this.camera.updateProjectionMatrix();
                 this.lerpSpeed = 0.03;
-                this.rotationLerpSpeed = 0.1;
+                this.rotationLerpSpeed = 0.03;
                 Object.values(this.game.playerManager.players).forEach(tank => tank.bigNameTag());
                 break;
 
@@ -248,7 +248,7 @@ export class CameraManager {
                 this.camera.fov = 70;
                 this.game.doNormalView();
                 this.camera.updateProjectionMatrix();
-                this.lerpSpeed = 0.05; 
+                this.lerpSpeed = 0.1; 
                 this.rotationLerpSpeed = 0.01;
                 Object.values(this.game.playerManager.players).forEach(tank => tank.bigNameTag());
                 break;
@@ -355,7 +355,7 @@ export class CameraManager {
         
         // Set camera position: above and slightly to the side of the projectile
         // Adjust these offset values as needed
-        const heightOffset = 200; // How high above the projectile
+        const heightOffset = 225; // How high above the projectile
         const sideOffset = 150;    // How far to the side of the projectile
         
         this.targetPosition.copy(projMeshPos)
@@ -376,9 +376,6 @@ export class CameraManager {
         this.camera.lookAt(this.targetLookAt);
         this.targetRotation.setFromQuaternion(this.camera.quaternion.clone());
         
-        // Optional: add a slight banking effect when projectile turns
-        // const bankAmount = 0.2;
-        // this.targetRotation.z = -forward.x * right.z * bankAmount;
     }
 
     updateThirdPersonView() {

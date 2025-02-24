@@ -8,7 +8,7 @@ export function areAllPlayersReady(gameCore) {
 }
 
 export function startReadyCountdown(gameCore) {
-  let countdownSeconds = 5;
+  let countdownSeconds = 2;
   gameCore.gameState = GamePhase.COUNTDOWN;
   
   // Only adjust numPlayers if it's not an all-CPU game

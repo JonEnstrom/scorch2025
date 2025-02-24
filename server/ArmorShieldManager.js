@@ -75,6 +75,7 @@ export default class ArmorShieldManager {
      */
     static addShield(player, amount) {
       player.shield += amount;
+      player.hasShield = true;
     }
   
     /**

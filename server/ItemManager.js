@@ -104,6 +104,14 @@ export default class ItemManager {
         cost: 1250,
         icon: 'icons/cluster_shot.png'
       },
+      {
+        name: 'Sprinkler',
+        code: 'SP01',
+        category: ITEM_CATEGORIES.WEAPON,
+        description: 'My sprinkler goes psh psh psh psh psh psh...',
+        cost: 1250,
+        icon: 'icons/cluster_shot.png'
+      },
 
       // -------------- ARMOR ---------------
       {
@@ -156,8 +164,9 @@ export default class ItemManager {
   getStarterItems() {
       // e.g., return a simple array of { name, quantity }
       return [
-        { name: 'Poverty Shot', quantity: 1000 },
+       //{ name: 'Poverty Shot', quantity: 1000 },
         { name: 'Jumping Bean', quantity: 40 },
+        { name: 'Sprinkler', quantity: 40 },    
         { name: 'Pea Shooter', quantity: 12 },
         { name: 'Bouncing Betty', quantity: 12 },
         { name: 'Bouncing Rabbit', quantity: 12 },

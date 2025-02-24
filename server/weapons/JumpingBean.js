@@ -8,17 +8,31 @@ export class JumpingBeanWeapon {
     this.weaponCode = 'JB01';
 
     // Weapon configuration
-    this.maxBounces = 15;  // Fewer bounces for more concentrated effect
-    this.bounceRadius = 2; // Very small radius for tight grouping
-    this.radiusVariance = 0.5;  // Minor variance for natural spread
+    this.maxBounces = 15;
+    this.bounceRadius = 10;      // Base radius for bounce spread
+    this.radiusVariance = 0.5;  // Variance in bounce radius
 
-    // Physics and scaling settings
-    this.baseTimeFactor = 0.5; // Faster movement for rapid peppering
-    this.timeFactorMultiplier = 0.9;
-    this.baseScale = 1.2;   // Smaller projectiles
-    this.scaleReduction = 0.98; // Minimal scale reduction
+    // Physics and timing settings
+    this.baseTimeFactor = 0.8;      // Starting speed (slowest)
+    this.minTimeFactor = 0.25;        // Minimum time factor (fastest)
+    
+    // Projectile appearance settings
+    this.baseScale = 1.2;           // Starting size
+    this.scaleReduction = 0.98;     // Size reduction per bounce
+    this.minScale = 0.5;            // Minimum projectile size
+    
+    // Damage and impact settings
+    this.baseDamage = 15;           // Initial projectile damage
+    this.damageReduction = 0.9;     // Damage reduction per bounce
+    this.minDamage = 5;            // Minimum damage per hit
+    this.craterSize = 20;           // Size of terrain deformation
+    
+    // Trajectory settings
+    this.basePower = 300;           // Initial projectile power
+    this.verticalBias = 1.6;        // How much to bias upward bounces
+    this.gravity = -1500;            // Stronger gravity for snappier arcs
 
-    // Register the weapon's impact handler
+    // Register weapon handler
     projectileManager.registerWeaponHandler(
       this.id,
       (impactData, timeline, manager) => this.handleImpact(impactData, timeline, manager)
@@ -30,18 +44,31 @@ export class JumpingBeanWeapon {
       startPos: tank.getBarrelTip(),
       direction: tank.getFireDirection(),
       power: tank.power,
+      
+      // Weapon identification
+      weaponId: this.id,
+      weaponCode: this.weaponCode,
+      playerId: playerId,
+      
+      // Projectile state
       isFinalProjectile: false,
+      bounceCount: 0,
+      doesCollide: true,
+      
+      // Physics properties
+      gravity: -300,
+      timeFactor: this.baseTimeFactor,
+      minTimeFactor: this.baseTimeFactor,
+      
+      // Visual properties
       explosionType: 'normal',
       explosionSize: 1.2,
       projectileScale: this.baseScale,
       projectileStyle: 'missile',
-      craterSize: 20,
-      baseDamage: 25,
-      timeFactor: 1.0,
-      bounceCount: 0,
-      doesCollide: true,
-      weaponId: this.id,
-      weaponCode: this.weaponCode
+      craterSize: this.craterSize,
+      
+      // Damage properties
+      baseDamage: this.baseDamage
     }];
 
     // Simulate the parent projectile
@@ -73,8 +100,7 @@ export class JumpingBeanWeapon {
       currentBounce
     );
 
-    // Simulate the next bounce with minimal delay
-    const spawnTime = impactData.time - 5; // Reduced spawn time for rapid sequence
+    const spawnTime = impactData.time;
     manager.simulateSubProjectile(nextBounceData, spawnTime, timeline);
   }
 
@@ -102,31 +128,55 @@ export class JumpingBeanWeapon {
       .subVectors(targetPos, nextPos)
       .normalize();
 
-    direction.y += 2.5; // Increased upward bias for steeper drops
+    direction.y += this.verticalBias; // Add upward bias for steeper drops
     direction.normalize();
 
-    const newScale = this.baseScale * Math.pow(this.scaleReduction, currentBounce);
-    const newTimeFactor = this.baseTimeFactor * Math.pow(this.timeFactorMultiplier, currentBounce);
+    // Calculate new scale and damage values with minimum limits
+    const newScale = Math.max(
+      this.baseScale * Math.pow(this.scaleReduction, currentBounce),
+      this.minScale
+    );
+    
+    const newDamage = Math.max(
+      this.baseDamage * Math.pow(this.damageReduction, currentBounce),
+      this.minDamage
+    );
+
+    // Calculate new time factor - halve it each bounce down to minTimeFactor
+    const newTimeFactor = Math.max(
+      this.baseTimeFactor / Math.pow(1.1, currentBounce),
+      this.minTimeFactor
+    );
+
     const isLastBounce = currentBounce === this.maxBounces - 1;
 
     return {
       startPos: nextPos,
       direction: direction,
-      power: 300,   // Lower power for tighter grouping
+      power: this.basePower,
       playerId: playerId,
       weaponId: this.id,
       weaponCode: this.weaponCode,
+      
+      // State
       isFinalProjectile: isLastBounce,
+      bounceCount: currentBounce + 1,
+      doesCollide: true,
+      
+      // Physics
+      gravity: this.gravity,
+      timeFactor: newTimeFactor,
+      minTimeFactor: this.baseTimeFactor,
+      
+      // Visual
       explosionType: 'normal',
       explosionSize: 1.2,
-      projectileScale: Math.max(newScale, 0.5),
+      projectileScale: newScale,
       projectileStyle: 'missile',
-      craterSize: 20, // Smaller craters
-      baseDamage: 10, // Slightly reduced damage per hit
-      bounceCount: currentBounce + 1,
-      timeFactor: Math.max(newTimeFactor, 0.3),
-      gravity: -800,
-      doesCollide: true
+      craterSize: this.craterSize,
+      
+      // Damage
+      baseDamage: newDamage
     };
   }
 

@@ -138,7 +138,7 @@ export default class ClusterWeapon {
       hitHelicopterId: null
     });
 
-    // 5) Spawn cluster bombs at the apex that maintain parent's momentum with added spread
+    // 5) Spawn cluster bombs at the apex
     const spawnTime = apexTime + 10;
     for (let i = 0; i < this.clusterCount; i++) {
       // Use the carrier's velocity as base direction for child projectiles
@@ -149,15 +149,15 @@ export default class ClusterWeapon {
       const subData = {
         startPos: apexPos.clone(),
         direction: direction,
-        power: power * this.clusterPowerMultiplier,
+        power: 200,
         isFinalProjectile: isFinal,
         projectileStyle: 'bomblet',
-        explosionSize: 2,
+        explosionSize: 1,
         explosionType: 'normal',
         projectileScale: 0.8 + (Math.random() * 0.4),
         craterSize: 25,
-        baseDamage: 40, // Ensure clusters cause significant damage
-        weaponId: this.id, // Keep weaponId for proper damage handling
+        baseDamage: 40, 
+        weaponId: this.id, 
         weaponCode: this.weaponCode
       };
       this.projectileManager.simulateSubProjectile(subData, spawnTime, timeline);

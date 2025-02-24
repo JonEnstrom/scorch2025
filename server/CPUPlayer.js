@@ -7,7 +7,7 @@ export default class CPUPlayer extends Player {
     this.isCPU = true;
     this.isReady = true;
     this.minPower = 100;
-    this.maxPower = 1000;
+    this.maxPower = 700;
     this.minPitch = -90;
     this.maxPitch = 10;
     this.turnTimeouts = new Set(); // Track active timeouts
@@ -214,7 +214,7 @@ export default class CPUPlayer extends Player {
   }
   
   getAvailableWeapons() {
-    const weaponCodes = ['BW01', 'CW01', 'BB01', 'BR01', 'VW01', 'MM01', 'RF01', 'MS01'];
+    const weaponCodes = ['BW01', 'CW01', 'BB01', 'BR01', 'VW01', 'MM01', 'RF01', 'MS01', 'JB01', 'SP01'];
     return weaponCodes.filter(code => this.hasItem(code));
   }
 

@@ -1,6 +1,6 @@
-// PrecalculatedProjectileManager.js
 import * as THREE from 'three';
 import { v4 as uuidv4 } from 'uuid';
+import ArmorShieldManager from './ArmorShieldManager.js';
 
 /**
  * Represents one projectile in the pre-calculated system.
@@ -29,57 +29,73 @@ class SimulatedProjectile {
     this.projectileStyle = data.projectileStyle ?? 'missile';
     this.projectileScale = data.projectileScale ?? 1;
 
-    // Physics - Now customizable per projectile
-    this.maxSpeed = this.power; // Keep max speed based on power
+    // Bounce behavior
+    this.preImpactBounces = data.preImpactBounces ?? 0;
+    this.currentBounces = 0;
+    this.bounciness = data.bounciness ?? 0.8;
+    this.upwardBias = data.upwardBias ?? 0.3;
+    this.minVerticalVelocity = data.minVerticalVelocity ?? 0.2;
+    this.bounceExplosion = data.bounceExplosion ?? false;
+    this.bounceDamage = data.bounceDamage ?? 0;
+    this.bounceCraterSize = data.bounceCraterSize ?? 0;
+    
+    // New parameter for controlling post-bounce power
+    this.preImpactBouncePower = data.preImpactBouncePower ?? null;
+
+    // Physics properties
+    this.maxSpeed = this.power;
     this.currentSpeed = 0;
     this.acceleration = data.acceleration ?? 300;
     this.gravity = data.gravity ?? -300;
 
-    // Time factor - static value for backwards compatibility.
-    // For dynamic behavior, optional dynamic properties may be provided.
-    this.timeFactor = data.timeFactor ?? 1.0;
-    if (data.initialTimeFactor !== undefined) {
-      this.initialTimeFactor = data.initialTimeFactor;
-    }
-    if (data.timeFactorRate !== undefined) {
-      this.timeFactorRate = data.timeFactorRate;
-    }
+    // Adaptive simulation properties
+    this.minTimeStep = data.minTimeStep ?? 1; // Minimum simulation step in ms
+    this.maxTimeStep = data.maxTimeStep ?? 25; // Maximum simulation step in ms
+    this.maxMovementPerStep = data.maxMovementPerStep ?? 2.0; // Maximum distance per step
+    this.collisionRadius = data.collisionRadius ?? 0.5; // Radius for collision detection
 
-    // We track velocity separately
+    // Enhanced time control properties
+    this.baseTimeFactor = data.timeFactor ?? 1.0;
+    this.initialTimeFactor = data.initialTimeFactor ?? this.baseTimeFactor;
+    this.timeFactorRate = data.timeFactorRate ?? 0;
+    this.minTimeFactor = data.minTimeFactor ?? 0.1;
+    this.maxTimeFactor = data.maxTimeFactor ?? 2.0;
+    this.bounceSpeedMultiplier = data.bounceSpeedMultiplier ?? 1.0;
+
+    // Initialize velocity vector
     this.velocity = new THREE.Vector3()
       .copy(this.direction)
       .multiplyScalar(this.currentSpeed);
 
-    // For convenience, track a "theme" if needed
     this.theme = data.theme || 'default';
   }
 }
 
 /**
- * This class pre-calculates the entire flight of projectiles
- * and returns a timeline of events.
+ * Pre-calculates the entire flight of projectiles and returns a timeline of events.
+ * Implements adaptive time stepping for accurate collision detection.
  */
 export default class PrecalculatedProjectileManager {
-  constructor(io, gameId, terrainManager, helicopterManager) {
+  constructor(io, gameId, terrainManager, playerManager) {
     this.io = io;
     this.gameId = gameId;
     this.terrainManager = terrainManager;
-    this.helicopterManager = helicopterManager;
     this.lastPathUpdateTime = Date.now();
+    this.playerManager = playerManager;
 
-    // Each weapon type can register a handler
-    // that gets called on projectile impact
+    // Simulation constants
+    this.NETWORK_UPDATE_INTERVAL = 25; // ms between network updates
+    this.MAX_SIMULATION_TIME = 10000; // ms maximum simulation duration
+    this.COLLISION_GRACE_PERIOD = 500; // ms grace period after bounces
+
+    // Weapon handlers for custom impact effects
     this.weaponHandlers = new Map();
-
-    // A callback to unify "impact" logic
-    // (e.g. your handleProjectileImpact from GameCore)
     this.onImpactCallback = null;
+
+    // For cleanup
+    this.scheduledTimeouts = [];
   }
 
-  /**
-   * We no longer keep a big array of projectiles, because
-   * everything is precomputed at the time of firing.
-   */
   registerWeaponHandler(weaponId, callback) {
     this.weaponHandlers.set(weaponId, callback);
   }
@@ -88,25 +104,62 @@ export default class PrecalculatedProjectileManager {
     this.lastPathUpdateTime = newTime;
   }
 
-  setImpactHandler(callback) {
-    this.onImpactCallback = callback;
+  /**
+   * Calculate the optimal time step based on current velocity and constraints
+   */
+  _calculateAdaptiveTimeStep(projectile, currentVelocity) {
+    const speed = currentVelocity.length();
+    if (speed === 0) return projectile.maxTimeStep;
+
+    // Calculate time step needed to move maxMovementPerStep units
+    const timeForMaxMovement = (projectile.maxMovementPerStep / speed) * 1000;
+
+    // Clamp between min and max time steps
+    return Math.max(
+      projectile.minTimeStep,
+      Math.min(projectile.maxTimeStep, timeForMaxMovement)
+    );
   }
 
   /**
-   * The main function the server calls to simulate
-   * the entire flight (or flights) of projectiles
-   * from a particular weapon usage.
-   *
-   * @param {String} playerId
-   * @param {Array<Object>} projectilesData - The initial set of projectiles to simulate
-   * @param {String} weaponId
-   * @param {String} weaponCode
-   * @returns {Array<Object>} - A timeline of events that you can broadcast to clients.
+   * Check if a movement between two points intersects with terrain
+   */
+  _checkTerrainIntersection(start, end, radius) {
+    const direction = end.clone().sub(start);
+    const distance = direction.length();
+    const steps = Math.ceil(distance / radius);
+    
+    if (steps <= 1) {
+      const groundHeight = this.terrainManager.generator.getHeightAtPositionBicubic(end.x, end.z);
+      return {
+        collision: end.y <= groundHeight,
+        position: new THREE.Vector3(end.x, groundHeight, end.z)
+      };
+    }
+
+    direction.normalize();
+    const stepSize = distance / steps;
+
+    for (let i = 0; i <= steps; i++) {
+      const point = start.clone().add(direction.clone().multiplyScalar(i * stepSize));
+      const groundHeight = this.terrainManager.generator.getHeightAtPositionBicubic(point.x, point.z);
+      if (point.y <= groundHeight) {
+        return {
+          collision: true,
+          position: new THREE.Vector3(point.x, groundHeight, point.z)
+        };
+      }
+    }
+
+    return { collision: false, position: null };
+  }
+
+  /**
+   * Simulate multiple projectiles and return a timeline of events
    */
   simulateProjectiles(playerId, projectilesData, weaponId, weaponCode) {
-    const timelineEvents = []; // all events in the simulation
+    const timelineEvents = [];
 
-    // For each "initial" projectile, we do a sub-simulation
     projectilesData.forEach(data => {
       const projectile = new SimulatedProjectile({
         ...data,
@@ -114,221 +167,341 @@ export default class PrecalculatedProjectileManager {
         weaponId,
         weaponCode
       });
-      // Start simulation for this projectile
       this._simulateSingleProjectile(projectile, 0, timelineEvents);
     });
 
-    // Sort events by ascending timestamp before returning
     timelineEvents.sort((a, b) => a.time - b.time);
-
     return timelineEvents;
   }
 
-  /**
-   * Recursively simulate a single projectile's flight from
-   * start to finish. If it spawns sub-projectiles (e.g. bouncing, cluster),
-   * we also simulate those in-line, appending to timelineEvents.
-   *
-   * @param {SimulatedProjectile} projectile
-   * @param {number} startTime - The time offset (ms) at which this projectile is "spawned"
-   * @param {Array} timelineEvents - Collector of all events
-   */
-  _simulateSingleProjectile(projectile, startTime, timelineEvents) {
-    // **KEY CHANGES HERE**
-    const internalTimeStep = 5; // ms
-    const networkTimeStep = 25;  // ms 
+/**
+ * Simulate a single projectile's complete trajectory
+ */
+_simulateSingleProjectile(projectile, startTime, timelineEvents) {
+  let timeAccumulator = 0;
+  let realTimeAccumulator = 0;
+  let lastNetworkUpdateTime = 0;
 
-    let timeAccumulator = 0; // ms of simulation time
-    let realTimeAccumulator = 0; // ms of real world time
-    let lastNetworkUpdateTime = 0; // Track when we last sent a 'projectileMove'
+  const position = projectile.startPos.clone();
+  let currentSpeed = projectile.currentSpeed;
+  const velocity = projectile.velocity.clone();
+  const direction = projectile.direction.clone();
+  
+  // Add a flag to track if we're using fixed power from a recent bounce
+  let usingFixedBounceSpeed = false;
+  let skipAccelerationForOneFrame = false;
 
-    // We'll keep a copy of the projectile's "live" position, velocity, etc.
-    const position = projectile.startPos.clone();
-    let currentSpeed = projectile.currentSpeed;
-    const velocity = projectile.velocity.clone();
-    const direction = projectile.direction.clone();
+  // Record spawn event
+  timelineEvents.push({
+    type: 'projectileSpawn',
+    time: startTime,
+    projectileId: projectile.id,
+    playerId: projectile.playerId,
+    startPos: { x: position.x, y: position.y, z: position.z },
+    direction: { x: direction.x, y: direction.y, z: direction.z },
+    power: projectile.power,
+    weaponId: projectile.weaponId,
+    weaponCode: projectile.weaponCode,
+    projectileStyle: projectile.projectileStyle,
+    projectileScale: projectile.projectileScale,
+    explosionType: projectile.explosionType,
+    explosionSize: projectile.explosionSize,
+    craterSize: projectile.craterSize,
+    isFinalProjectile: projectile.isFinal,
+    doesCollide: projectile.doesCollide,
+    bounceCount: projectile.bounceCount
+  });
 
-    // Record a "spawn" event
-    timelineEvents.push({
-      type: 'projectileSpawn',
-      time: startTime,
-      projectileId: projectile.id,
-      playerId: projectile.playerId,
-      startPos: { x: position.x, y: position.y, z: position.z },
-      direction: { x: direction.x, y: direction.y, z: direction.z },
-      power: projectile.power,
-      weaponId: projectile.weaponId,
-      weaponCode: projectile.weaponCode,
-      projectileStyle: projectile.projectileStyle,
-      projectileScale: projectile.projectileScale,
-      explosionType: projectile.explosionType,
-      explosionSize: projectile.explosionSize,
-      craterSize: projectile.craterSize,
-      isFinalProjectile: projectile.isFinal,
-      doesCollide: projectile.doesCollide,
-      bounceCount: projectile.bounceCount || 0
-    });
+  let isActive = true;
+  const previousPosition = position.clone();
 
-    // We'll simulate up to some max time or until it hits the ground, etc.
-    const maxSimTime = 10000; // ms
-    let isActive = true;
-
-    // Calculate a grace period for terrain collision based on bounceCount
-    const collisionGracePeriod = projectile.bounceCount > 0 ? 500 : 500; // ms
-
-    // Base time for absolute time calculations
-    const simulationStartTime = this.lastPathUpdateTime;
-
-    while (isActive && timeAccumulator < maxSimTime) {
-      // Determine effective time factor
-      let effectiveTimeFactor;
-      if (
-        projectile.hasOwnProperty('initialTimeFactor') &&
-        projectile.hasOwnProperty('timeFactorRate')
-      ) {
-        const elapsedSeconds = realTimeAccumulator / 1000;
-        effectiveTimeFactor = projectile.initialTimeFactor + elapsedSeconds * projectile.timeFactorRate;
-      } else {
-        effectiveTimeFactor = projectile.timeFactor;
+  while (isActive && timeAccumulator < this.MAX_SIMULATION_TIME) {
+    // Calculate dynamic time factor
+    let effectiveTimeFactor;
+    if (projectile.timeFactorRate !== 0) {
+      const elapsedSeconds = realTimeAccumulator / 1000;
+      effectiveTimeFactor = projectile.initialTimeFactor + elapsedSeconds * projectile.timeFactorRate;
+      
+      // Apply bounce speed multiplier based on bounce count
+      if (projectile.bounceSpeedMultiplier !== 1.0) {
+        effectiveTimeFactor *= Math.pow(projectile.bounceSpeedMultiplier, projectile.bounceCount);
       }
+      
+      // Clamp to min/max values
+      effectiveTimeFactor = Math.max(
+        projectile.minTimeFactor,
+        Math.min(projectile.maxTimeFactor, effectiveTimeFactor)
+      );
+    } else {
+      effectiveTimeFactor = projectile.baseTimeFactor;
+    }
 
-      // Adjust timeStep based on the effective time factor
-      const timeStep = internalTimeStep / effectiveTimeFactor;  // Use internalTimeStep
+    // Calculate base time step from adaptive system
+    const baseTimeStep = this._calculateAdaptiveTimeStep(projectile, velocity);
+    
+    // Apply time factor to get actual simulation step
+    const simulationTimeStep = baseTimeStep / effectiveTimeFactor;
+    
+    // Calculate how much real time this simulation step represents
+    const realTimeStep = baseTimeStep;
 
-      // Increment simulation time
-      timeAccumulator += internalTimeStep; // Always increment by internalTimeStep
+    // Store previous position for collision checking
+    previousPosition.copy(position);
 
-      // Increment real-world time (this is what gets reported in events)
-      realTimeAccumulator += internalTimeStep;  // Also increment by internal step
-
-      // Calculate current absolute time for helicopter collision checks
-      const currentAbsoluteTime = simulationStartTime + realTimeAccumulator;
-
-      // 1) Accelerate if needed
-      if (currentSpeed < projectile.maxSpeed) {
-        currentSpeed = Math.min(
-          projectile.maxSpeed,
-          currentSpeed + projectile.acceleration * (timeStep / 1000)
-        );
+    // Update physics using simulation time step
+    // Only apply acceleration if we're not using a fixed bounce speed
+    if (!skipAccelerationForOneFrame && currentSpeed < projectile.maxSpeed) {
+      currentSpeed = Math.min(
+        projectile.maxSpeed,
+        currentSpeed + projectile.acceleration * (simulationTimeStep / 1000)
+      );
+      // Only update velocity magnitude if we're not using a fixed bounce speed
+      if (!usingFixedBounceSpeed) {
         velocity.copy(direction).multiplyScalar(currentSpeed);
       }
+    }
+    
+    // Reset the skip acceleration flag if it was set
+    if (skipAccelerationForOneFrame) {
+      skipAccelerationForOneFrame = false;
+    }
 
-      // 2) Gravity
-      velocity.y += projectile.gravity * (timeStep / 1000);
+    // Apply gravity
+    velocity.y += projectile.gravity * (simulationTimeStep / 1000);
 
-      // 3) Update position
-      position.x += velocity.x * (timeStep / 1000);
-      position.y += velocity.y * (timeStep / 1000);
-      position.z += velocity.z * (timeStep / 1000);
+    // Update position
+    position.add(velocity.clone().multiplyScalar(simulationTimeStep / 1000));
 
-      // 4) Check collision with terrain, but include grace period for bounced projectiles
-      const groundHeight = this.terrainManager.getHeightAtPosition(position.x, position.z);
+    // Check for terrain collision
+    const hasCollisionGracePeriod = timeAccumulator < this.COLLISION_GRACE_PERIOD;
+    if (!hasCollisionGracePeriod && projectile.doesCollide) {
+      const intersection = this._checkTerrainIntersection(
+        previousPosition,
+        position,
+        projectile.collisionRadius
+      );
 
-      // Skip terrain collision during grace period
-      const hasCollisionGracePeriod = timeAccumulator < collisionGracePeriod;
-
-        // **CRITICAL CHANGE: Use more precise time for impacts**
-      if (position.y <= groundHeight && !hasCollisionGracePeriod) {
-          // We have impact at time => (startTime + realTimeAccumulator)
-          this._handleImpact(
+      if (intersection.collision) {
+        // Check if we should process automatic bounce
+        if (projectile.currentBounces < projectile.preImpactBounces) {
+          // Handle automatic bounce
+          const bounceResult = this._handleAutomaticBounce(
             projectile,
-            { x: position.x, y: groundHeight, z: position.z },
-            startTime + realTimeAccumulator, // Use the *actual* accumulated time
+            intersection.position, 
+            velocity.clone(),
+            startTime + (realTimeAccumulator * effectiveTimeFactor),
             timelineEvents
           );
-          isActive = false;
-
-      }  else {
-          // **Network Update Logic**
-          if (realTimeAccumulator - lastNetworkUpdateTime >= networkTimeStep) {
-            // Record position updates with adjusted time
-            timelineEvents.push({
-              type: 'projectileMove',
-              time: startTime + realTimeAccumulator,
-              projectileId: projectile.id,
-              position: { x: position.x, y: position.y, z: position.z }
-            });
-            lastNetworkUpdateTime = realTimeAccumulator; // Update last sent time
+          
+          // Update projectile state
+          position.copy(bounceResult.newPosition);
+          velocity.copy(bounceResult.newVelocity);
+          direction.copy(bounceResult.newDirection);
+          currentSpeed = bounceResult.newSpeed;
+          
+          // Set flags based on bounce result
+          usingFixedBounceSpeed = bounceResult.isFixedPower;
+          skipAccelerationForOneFrame = true;  // Skip acceleration for one frame after bounce
+          
+          // Increment bounce count
+          projectile.currentBounces++;
+          projectile.bounceCount++;
+          
+          // Add bounce event to timeline if needed
+          if (bounceResult.bounceEvent) {
+            timelineEvents.push(bounceResult.bounceEvent);
           }
-      }
-
-      // 5) Check collisions with helicopters (if still active)
-      if (isActive && this.helicopterManager) {
-        const helicopter = this._checkHelicopterCollision(
-          projectile,
-          position,
-          1,
-          currentAbsoluteTime
-        );
-        if (helicopter) {
-            // **CRITICAL CHANGE: Use more precise time**
-          this._handleHelicopterHit(
+        } else {
+          // Normal impact handling when we've exhausted pre-impact bounces
+          this._handleImpact(
             projectile,
-            helicopter,
-            position,
-            startTime + realTimeAccumulator,  // Use actual accumulated time
-            timelineEvents
+            intersection.position,
+            startTime + (realTimeAccumulator * effectiveTimeFactor),
+            timelineEvents,
+            velocity.clone() // Pass current velocity for reflection calculations
           );
           isActive = false;
         }
       }
     }
 
-    // If we exit the loop "naturally"
-    if (isActive) {
+    // Update accumulators separately for simulation and real time
+    timeAccumulator += simulationTimeStep;
+    realTimeAccumulator += realTimeStep;
+
+    // Send network updates at fixed intervals
+    // Scale the event time by the time factor
+    if (isActive && realTimeAccumulator - lastNetworkUpdateTime >= this.NETWORK_UPDATE_INTERVAL) {
       timelineEvents.push({
-        type: 'projectileExpired',
-        time: startTime + realTimeAccumulator,
-        projectileId: projectile.id
+        type: 'projectileMove',
+        time: startTime + (realTimeAccumulator * effectiveTimeFactor),
+        projectileId: projectile.id,
+        position: { x: position.x, y: position.y, z: position.z }
       });
+      lastNetworkUpdateTime = realTimeAccumulator;
     }
   }
+}
 
-
-  /**
-  * Check collision with any helicopter in helicopterManager at a specific time.
-  * Now uses the helicopter's planned path to determine its position.
-  * @param {SimulatedProjectile} projectile
-  * @param {THREE.Vector3} position - Projectile position
-  * @param {number} radius - Collision check radius
-  * @param {number} absoluteTime - The absolute time (in ms) to check collision at
-  */
-  _checkHelicopterCollision(projectile, position, radius, absoluteTime) {
-    if (!this.helicopterManager?.helicopters) return null;
-
-    // Convert absoluteTime to relative time for helicopter path lookup
-    // We need to account for the most recent path update time
-    const relativeTime = Math.max(0, (absoluteTime - this.lastPathUpdateTime) / 1000);
-
-    for (const helicopter of this.helicopterManager.helicopters.values()) {
-      // Get helicopter state at this exact time
-      const helicopterState = helicopter.getFutureState(relativeTime);
-      if (!helicopterState) continue;
-
-      // Get helicopter position from its state
-      const helicopterPos = helicopterState.position;
-
-      // Simple distance check with the interpolated position
-      const dx = helicopterPos.x - position.x;
-      const dy = helicopterPos.y - position.y;
-      const dz = helicopterPos.z - position.z;
-      const distSq = dx * dx + dy * dy + dz * dz;
-
-      // Use helicopter's actual bounding radius
-      const helicopterRadius = helicopter.boundingRadius;
-      if (distSq < (radius + helicopterRadius) ** 2) {
-        return helicopter;
-      }
-    }
-    return null;
+/**
+ * Handle an automatic bounce without ending the projectile
+ * @param {SimulatedProjectile} projectile - The projectile to bounce
+ * @param {THREE.Vector3} impactPos - The impact position
+ * @param {THREE.Vector3} velocity - Current velocity
+ * @param {number} eventTime - Current simulation time
+ * @param {Array} timelineEvents - Timeline to add events to
+ * @returns {Object} Result containing new position, velocity, and optional bounce event
+ */
+_handleAutomaticBounce(projectile, impactPos, velocity, eventTime, timelineEvents) {
+  // Calculate surface normal at impact point
+  const surfaceNormal = this._calculateTerrainNormal(impactPos);
+  
+  // Calculate reflection direction
+  const incomingDirection = velocity.clone().normalize();
+  const newDirection = this._calculateReflectionDirection(
+    incomingDirection, 
+    surfaceNormal
+  );
+  
+  // Apply upward bias to prevent sliding along terrain
+  newDirection.y += projectile.upwardBias;
+  
+  // Ensure minimum vertical component for a good bounce
+  if (newDirection.y < projectile.minVerticalVelocity) {
+    newDirection.y = projectile.minVerticalVelocity;
+    newDirection.normalize();
   }
+  
+  // Calculate new velocity based on direction and either preImpactBouncePower or reduced speed
+  let newSpeed;
+  let isFixedPower = false;
+  
+  if (projectile.preImpactBouncePower !== null) {
+    // Use the preset bounce power if specified
+    newSpeed = projectile.preImpactBouncePower;
+    isFixedPower = true;
+  } else {
+    // Otherwise use the bounciness factor to determine the retained energy
+    newSpeed = velocity.length() * projectile.bounciness;
+  }
+  
+  const newVelocity = newDirection.clone().multiplyScalar(newSpeed);
+  
+  // Create new position slightly above terrain to prevent immediate re-collision
+  const newPosition = new THREE.Vector3(
+    impactPos.x,
+    impactPos.y + 1.0, // Lift slightly off ground
+    impactPos.z
+  );
+  
+  let bounceEvent = null;
+  
+  // If this bounce should cause effects, create an event
+  if (projectile.bounceExplosion) {
+    bounceEvent = {
+      type: 'projectileBounce',
+      time: eventTime,
+      projectileId: projectile.id,
+      playerId: projectile.playerId,
+      position: {
+        x: impactPos.x,
+        y: impactPos.y,
+        z: impactPos.z
+      },
+      bounceCount: projectile.currentBounces,
+      incomingDirection: {
+        x: incomingDirection.x,
+        y: incomingDirection.y,
+        z: incomingDirection.z
+      },
+      outgoingDirection: {
+        x: newDirection.x,
+        y: newDirection.y,
+        z: newDirection.z
+      },
+      surfaceNormal: {
+        x: surfaceNormal.x,
+        y: surfaceNormal.y,
+        z: surfaceNormal.z
+      },
+      explosionType: 'bounce',
+      explosionSize: projectile.explosionSize * 0.5,
+      craterSize: projectile.bounceCraterSize,
+      damage: projectile.bounceDamage
+    };
+  }
+  
+  return {
+    newPosition,
+    newVelocity,
+    newDirection,
+    bounceEvent,
+    isFixedPower,  // Add this flag to indicate we're using a fixed power
+    newSpeed       // Add the new speed for easier access
+  };
+}
 
   /**
-   * Called when a projectile collides with the ground (terrain).
-   * We create an "impact" event, and we also call any "impact" callbacks
-   * (including your handleProjectileImpact from GameCore).
+   * Calculate terrain normal at a given position
+   * @param {THREE.Vector3} position - Impact position
+   * @return {THREE.Vector3} Normalized surface normal
    */
-  _handleImpact(projectile, impactPos, eventTime, timelineEvents) {
+  _calculateTerrainNormal(position) {
+    // Sample points around the impact to determine terrain slope
+    const sampleDist = 1.0; // Distance for sampling
+    
+    // Get heights at sample points
+    const centerHeight = this.terrainManager.generator.getHeightAtPositionBicubic(position.x, position.z);
+    const heightPX = this.terrainManager.generator.getHeightAtPositionBicubic(position.x + sampleDist, position.z);
+    const heightNX = this.terrainManager.generator.getHeightAtPositionBicubic(position.x - sampleDist, position.z);
+    const heightPZ = this.terrainManager.generator.getHeightAtPositionBicubic(position.x, position.z + sampleDist);
+    const heightNZ = this.terrainManager.generator.getHeightAtPositionBicubic(position.x, position.z - sampleDist);
+    
+    // Calculate slope vectors
+    const slopeX = new THREE.Vector3(2 * sampleDist, heightPX - heightNX, 0).normalize();
+    const slopeZ = new THREE.Vector3(0, heightPZ - heightNZ, 2 * sampleDist).normalize();
+    
+    // Cross product gives the normal
+    const normal = new THREE.Vector3().crossVectors(slopeZ, slopeX).normalize();
+    
+    // Ensure normal points upward (terrain shouldn't have overhangs)
+    if (normal.y < 0) normal.negate();
+    
+    return normal;
+  }
+
+  /**
+   * Calculate reflection direction based on impact
+   * @param {THREE.Vector3} incomingDir - Normalized incoming direction
+   * @param {THREE.Vector3} surfaceNormal - Normalized surface normal
+   * @param {number} bounciness - Coefficient of restitution (0-1)
+   * @return {THREE.Vector3} Reflection direction (normalized)
+   */
+  _calculateReflectionDirection(incomingDir, surfaceNormal) {
+    // Reflection formula: R = V - 2(V·N)N where N is normalized
+    const dot = incomingDir.dot(surfaceNormal);
+    
+    // Calculate reflection direction
+    const reflectionDir = new THREE.Vector3().copy(incomingDir);
+    reflectionDir.sub(surfaceNormal.clone().multiplyScalar(2 * dot));
+    
+    // Just normalize without applying bounciness here
+    return reflectionDir.normalize();
+  }
+
+
+  /**
+   * Handle projectile impact with terrain
+   */
+  _handleImpact(projectile, impactPos, eventTime, timelineEvents, velocity) {
+    // Calculate surface normal at impact point
+    const surfaceNormal = this._calculateTerrainNormal(impactPos);
+    
+    // Create a default direction if velocity is not provided
+    const incomingDirection = velocity ? 
+      velocity.clone().normalize() : 
+      new THREE.Vector3(0, -1, 0); // Default to straight down if no velocity provided
+    
     const impactEvent = {
       type: 'projectileImpact',
       time: eventTime,
@@ -342,150 +515,107 @@ export default class PrecalculatedProjectileManager {
       explosionSize: projectile.explosionSize,
       explosionType: projectile.explosionType,
       bounceCount: projectile.bounceCount,
-      isHelicopterHit: false,
-      hitHelicopterId: null
+      // Add these new properties
+      incomingDirection: { 
+        x: incomingDirection.x, 
+        y: incomingDirection.y, 
+        z: incomingDirection.z 
+      },
+      surfaceNormal: { 
+        x: surfaceNormal.x, 
+        y: surfaceNormal.y, 
+        z: surfaceNormal.z 
+      }
     };
+    
     timelineEvents.push(impactEvent);
+    
+    /* NOT DOING THIS RIGHT NOW, NEED TO REFACTOR THE CODE FOR TERRAIN MODIFICATIONS.
+    // Modify terrain
+    const patch = this.terrainManager.generator.modifyTerrain(
+      impactPos.x,
+      impactPos.z,
+      projectile.craterSize,
+      'crater'
+    );
+*/
 
-    // If we have a global or weapon-specific impact callback, call it
-    // so that it can do terrain damage, player damage, spawn sub-projectiles, etc.
+    // Handle weapon-specific effects
     const weaponHandler = this.weaponHandlers.get(projectile.weaponId);
     if (weaponHandler) {
-      // The weapon can spawn additional projectiles or do extra logic
-      // (In the new approach, you'd do "pre-simulation" of any spawns here.)
       weaponHandler(impactEvent, timelineEvents, this);
+    }
+
+    // Call general impact callback
+    if (this.onImpactCallback) {
+      this.onImpactCallback(impactEvent);
     }
   }
 
   /**
-   * Called when a projectile hits a helicopter mid-air.
+   * Schedule timeline events for execution
    */
-  _handleHelicopterHit(projectile, helicopter, position, eventTime, timelineEvents) {
-    // Calculate damage but don't apply it immediately
-    const damage = projectile.baseDamage;
-
-    // Create the impact event
-    const impactEvent = {
-      type: 'projectileImpact',
-      time: eventTime,
-      projectileId: projectile.id,
-      playerId: projectile.playerId,
-      position,
-      isFinalProjectile: projectile.isFinal,
-      craterSize: projectile.craterSize,
-      aoeSize: projectile.aoeSize,
-      damage: damage,
-      explosionSize: projectile.explosionSize,
-      explosionType: projectile.explosionType,
-      bounceCount: projectile.bounceCount,
-      isHelicopterHit: true,
-      hitHelicopterId: helicopter.id
-    };
-    timelineEvents.push(impactEvent);
-
-    // Push a separate helicopter damage event to the timeline
-    // This will be processed at the scheduled time
-    timelineEvents.push({
-      type: 'helicopterDamage',
-      time: eventTime,
-      helicopterId: helicopter.id,
-      damage: damage,
-      projectileId: projectile.id,
-      playerId: projectile.playerId
-    });
-
-    // Weapon-specific handler is still called during simulation
-    // but it should only generate additional events, not apply effects immediately
-    const weaponHandler = this.weaponHandlers.get(projectile.weaponId);
-    if (weaponHandler) {
-      weaponHandler(impactEvent, timelineEvents, this);
-    }
-  }
-
-  scheduleTimeline(timeline, startAt = Date.now(), gameCore) {
-    // Keep references if you want to be able to cancel timeouts later
-    if (!this.scheduledTimeouts) {
-      this.scheduledTimeouts = [];
-    }
-
-    // The timeline events' `time` are in [0 ... ~10000] ms since we started simulating.
-    // We'll assume `time=0` means "immediate" from `startAt`.
+  scheduleTimeline(timeline, startAt = Date.now()) {
     for (const event of timeline) {
-      const delay = event.time; // e.g. 2000 means 2 seconds from the start.
-
-      // If you want to offset them from *now*:
-      // let realDelay = (startAt + delay) - Date.now();
-
-      // But typically, if "time" is already how many ms from "now,"
-      // we can just do:
-      const realDelay = delay;
-
-      // Don't let negative or very small delays break anything
-      const clampedDelay = Math.max(realDelay, 0);
-
+      const delay = Math.max(event.time, 0);
       const timeoutId = setTimeout(() => {
-        this._processScheduledEvent(event, gameCore);
-      }, clampedDelay);
-
+        this._processScheduledEvent(event);
+      }, delay);
       this.scheduledTimeouts.push(timeoutId);
     }
   }
 
   /**
-   * Called for each event at the correct time (via setTimeout).
-   * We decide how to handle each event type.
-   * Usually, "projectileImpact" is the big one that modifies terrain + deals damage.
+   * Process a scheduled timeline event
    */
-  _processScheduledEvent(event, gameCore) {
-    switch (event.type) {
-      case 'projectileImpact':
-        // Now we do the real game effect
-        if (this.onImpactCallback) {
-          // For example, pass it into GameCore's handleProjectileImpact
-          this.onImpactCallback(event);
-        }
-        break;
-
-      case 'helicopterDamage':
-        // Apply the helicopter damage at the scheduled time
-        if (this.helicopterManager && this.helicopterManager.helicopters.has(event.helicopterId)) {
-          const helicopter = this.helicopterManager.helicopters.get(event.helicopterId);
-          const destroyed = helicopter.takeDamage(event.damage);
-
-          // If the helicopter was destroyed, broadcast that event
-          if (destroyed) {
-            // Notify clients about the destroyed helicopter
-            this.io.to(this.gameId).emit('helicopterDestroyed', {
-              helicopterId: helicopter.id,
-              playerId: event.playerId
+  _processScheduledEvent(event) {
+    // Handle both impact and bounce events for damage
+    if (event.type === 'projectileImpact' || event.type === 'projectileBounce') {
+      const allPlayers = this.playerManager.getPlayersObject();
+      for (const [userId, player] of Object.entries(allPlayers)) {
+        if (!player.isAlive) continue;
+  
+        const playerPos = player.getPosition();
+        const dx = playerPos.x - event.position.x;
+        const dz = playerPos.z - event.position.z;
+        const distance = Math.sqrt(dx * dx + dz * dz);
+  
+        // Area-of-effect damage
+        if (distance < event.aoeSize) {
+          const falloffPercent = (distance / event.aoeSize) * 0.5;
+          const damageMultiplier = 1 - falloffPercent;
+          const damage = Math.round(event.damage * damageMultiplier);
+  
+          // Only apply damage if greater than zero
+          if (damage > 0) {
+            const damageResult = ArmorShieldManager.applyDamage(player, damage);
+    
+            this.io.to(this.gameId).emit('playerDamaged', {
+              id: userId,
+              damage: damage,
+              damageDistribution: damageResult,
+              currentHealth: player.getHealth()
             });
-
-            // Remove the helicopter from the manager
-            this.helicopterManager.helicopters.delete(helicopter.id);
+    
+            if (player.getHealth() <= 0) {
+              player.isAlive = false;
+              this.io.to(this.gameId).emit('playerDefeated', { id: userId });
+            }
+            if (player.hasShield && player.getShield() <= 0) {
+              this.io.to(this.gameId).emit('removeShield', { playerId: userId });
+              player.hasShield = false;
+            }
+  
+            this.io.to(this.gameId).emit('playerListUpdated', this.playerManager.getAllPlayers());
           }
         }
-        break;
-
-      case 'helicopterDestroyed':
-        // This is now handled within helicopterDamage case
-        // but we keep it for backward compatibility
-        break;
-
-      default:
-        break;
+      }
+      this.playerManager.adjustPositionsToTerrain();
     }
   }
 
   /**
-   * Utility to create new projectiles from a weapon’s sub-spawn logic
-   * (e.g. BouncingBetty spawns a new projectile after an impact).
-   *
-   * This will do a sub-simulation (recursively) and merge its events
-   * into the existing timeline, starting at some offset time.
-   *
-   * @param {Object} spawnData - same structure as `projectilesData` in `simulateProjectiles`.
-   * @param {Number} spawnTime - when the new projectile starts.
-   * @param {Array} timelineEvents - collector array for all events.
+   * Create and simulate a sub-projectile (e.g., for cluster weapons)
    */
   simulateSubProjectile(spawnData, spawnTime, timelineEvents) {
     const projectile = new SimulatedProjectile(spawnData);

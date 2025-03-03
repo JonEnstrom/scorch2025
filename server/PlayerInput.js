@@ -11,6 +11,9 @@ import { BouncingRabbitWeapon } from './weapons/BouncingRabbit.js';
 import { JumpingBeanWeapon } from './weapons/JumpingBean.js';
 import { SprinklerWeapon } from './weapons/SprinklerWeapon.js';
 import ArmorShieldManager from './ArmorShieldManager.js';
+import { PopcornWeapon } from './weapons/PopcornWeapon.js';
+import GuidedWeapon from './weapons/GuidedWeapon.js';
+import MultiGuidedWeapon from './weapons/MultiGuidedWeapon.js';
 
 /**
  * Process incoming input from a player (movement, firing, using an item, etc.).
@@ -116,11 +119,20 @@ export function processInput(playerId, input, gameInstance) {
                     case 'MS01': // MultiShot
                     weaponInstance = new MultiShotWeapon(gameInstance.projectileManager);
                     break;
-                case 'JB01': // MultiShot
+                case 'JB01': // Jumping Bean
                     weaponInstance = new JumpingBeanWeapon(gameInstance.projectileManager);
                     break;
-                case 'SP01': // MultiShot
+                case 'SP01': // Sprinkler
                     weaponInstance = new SprinklerWeapon(gameInstance.projectileManager);
+                    break;
+                    case 'PC01': // Popcorn
+                    weaponInstance = new PopcornWeapon(gameInstance.projectileManager);
+                    break;
+                    case 'HK01': // Heli Killer
+                    weaponInstance = new GuidedWeapon(gameInstance.projectileManager);
+                    break;
+                    case 'HK02': // Multi Heli Killer
+                    weaponInstance = new MultiGuidedWeapon(gameInstance.projectileManager);
                     break;
                 default:
                     gameInstance.io.to(playerId).emit('errorMessage', `Unknown weapon code: ${weaponCode}`);

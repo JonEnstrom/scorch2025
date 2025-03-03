@@ -112,6 +112,30 @@ export default class ItemManager {
         cost: 1250,
         icon: 'icons/cluster_shot.png'
       },
+      {
+        name: 'Popcorn',
+        code: 'PC01',
+        category: ITEM_CATEGORIES.WEAPON,
+        description: 'Pop pop pop!',
+        cost: 1250,
+        icon: 'icons/cluster_shot.png'
+      },
+      {
+        name: 'Heli Killer',
+        code: 'HK01',
+        category: ITEM_CATEGORIES.WEAPON,
+        description: 'Seek and ye shall find...',
+        cost: 1250,
+        icon: 'icons/cluster_shot.png'
+      },
+      {
+        name: 'Multi Heli Killer',
+        code: 'HK02',
+        category: ITEM_CATEGORIES.WEAPON,
+        description: 'BOP BOP BOP BOP BOP',
+        cost: 1250,
+        icon: 'icons/cluster_shot.png'
+      },
 
       // -------------- ARMOR ---------------
       {
@@ -164,13 +188,16 @@ export default class ItemManager {
   getStarterItems() {
       // e.g., return a simple array of { name, quantity }
       return [
-       //{ name: 'Poverty Shot', quantity: 1000 },
-        { name: 'Jumping Bean', quantity: 40 },
-        { name: 'Sprinkler', quantity: 40 },    
+       { name: 'Poverty Shot', quantity: 1000 },
+       { name: 'Jumping Bean', quantity: 40 },
+       { name: 'Popcorn', quantity: 40 },
+       { name: 'Heli Killer', quantity: 40 },
+       { name: 'Multi Heli Killer', quantity: 40 },
+       { name: 'Sprinkler', quantity: 40 },    
         { name: 'Pea Shooter', quantity: 12 },
         { name: 'Bouncing Betty', quantity: 12 },
         { name: 'Bouncing Rabbit', quantity: 12 },
-        { name: 'Volley Weapon', quantity: 12 },
+        { name: 'Volley Weapon', quantity: 102 },
         { name: 'Cluster Weapon', quantity: 12 },
         { name: 'Mountain Merc', quantity: 12 },
         { name: 'Rain Of Fire', quantity: 122 },

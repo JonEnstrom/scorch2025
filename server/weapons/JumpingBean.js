@@ -170,9 +170,9 @@ export class JumpingBeanWeapon {
       
       // Visual
       explosionType: 'normal',
-      explosionSize: 1.2,
+      explosionSize: 0.6,
       projectileScale: newScale,
-      projectileStyle: 'missile',
+      projectileStyle: 'spike_bomb',
       craterSize: this.craterSize,
       
       // Damage

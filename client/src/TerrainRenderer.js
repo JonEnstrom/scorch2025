@@ -1,7 +1,7 @@
 // client/src/terrainRenderer.js
 import * as THREE from 'three';
 import { WaterShader } from './shaders/WaterShader.js';
-import { HeightBlendedShader } from './shaders/HeighBlendedShader.js';
+import { HeightBlendedShader } from './shaders/HeightBlendedShader.js';
 import { ScorchShader } from './shaders/ScorchShader.js';
 
 export class TerrainRenderer {

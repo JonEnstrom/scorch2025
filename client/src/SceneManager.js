@@ -4,7 +4,6 @@ import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader';
 import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { GameLoadingManager } from './LoadingManager';
-import { floorPowerOfTwo } from 'three/src/math/MathUtils.js';
 
 export class SceneManager {
     constructor(game) {
@@ -188,7 +187,7 @@ export class SceneManager {
                     normalMap: normalMap,
                     normalScale: new THREE.Vector2(1, 1),
                     roughness: 0.5,
-                    metalness: 0.1
+                    metalness: 0.1,
                 });
                 child.receiveShadow = true;
                 child.castShadow = true;
@@ -196,7 +195,8 @@ export class SceneManager {
         });
         
         tableMesh.position.set(0, -990, 0);
-        tableMesh.scale.set(670, 670, 670);
+        tableMesh.scale.set(680, 680, 680);
+        tableMesh.renderOrder = 99;
         return tableMesh;
     }
 }

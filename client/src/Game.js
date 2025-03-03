@@ -2,7 +2,6 @@
 import { Clock } from 'three';
 import { EventEmitter } from './EventEmitter';
 import * as THREE from 'three';
-import { ClientProjectile } from './Projectile.js';
 import { GameInput } from './GameInput.js';
 import { CameraManager } from './CameraManager.js';
 import { TerrainRenderer } from './TerrainRenderer.js';
@@ -10,10 +9,9 @@ import { SceneManager } from './SceneManager.js';
 import { ShopManager } from './stores/shopStore.js';
 import { PlayerManager } from './PlayerManager.js';
 import { DamageNumberManager } from './DamageNumberManager.js';
-import { GPUParticleManager } from './GpuParticleManager.js';
 import { FoliageManager } from './FoliageManager.js';
 import { ShieldManager } from './ShieldManager.js';
-import { HelicopterManager } from './HelicopterManager.js';
+import { HelicopterController } from './HelicopterController.js';
 import { PingManager } from './PingManager.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
@@ -21,6 +19,12 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { DroneFeedShader } from './shaders/DroneFeedShader.js';
 import { notificationManager } from './NotificationManager';
 import { ProjectileTimelineManager } from './ProjectileTimelineManager.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { GammaCorrectionShader } from 'three/examples/jsm/shaders/GammaCorrectionShader.js';
+
+// Selective bloom constant and dark material for non-bloomed objects
+const BLOOM_SCENE = 1;
+const darkMaterial = new THREE.MeshBasicMaterial({ color: 'black' });
 
 class FPSDisplay {
     constructor() {
@@ -64,6 +68,12 @@ export class Game extends EventEmitter {
         this.socket = socket;
         this.projectiles = [];
         this.projectileMap = new Map();
+        this.materialsBackup = {}; // To store original materials during bloom pass
+
+        // Set up bloom layer (layer index 1)
+        this.bloomLayer = new THREE.Layers();
+        this.bloomLayer.set(BLOOM_SCENE);
+
         this.setupGameState();
         this.setupManagers();
     }
@@ -92,9 +102,63 @@ export class Game extends EventEmitter {
         const { scene, renderer } = this.sceneManager.setupScene();
         this.scene = scene;
         this.renderer = renderer;
-        this.composer = new EffectComposer(renderer);
+
+        // Set up the composers for selective bloom:
+        // 1. The final composer renders the full scene composite (base + bloom)
+        this.finalComposer = new EffectComposer(renderer);
+        this.finalComposer.renderToScreen = true;
+        this.renderPass = new RenderPass(this.scene, this.cameraManager ? this.cameraManager.camera : null);
+        this.finalComposer.addPass(this.renderPass);
+
+        // 2. The bloom composer renders only objects in the bloom layer.
+        this.bloomComposer = new EffectComposer(renderer);
+        this.bloomComposer.renderToScreen = false;
+        const bloomRenderPass = new RenderPass(this.scene, this.cameraManager ? this.cameraManager.camera : null);
+        this.bloomComposer.addPass(bloomRenderPass);
+
+        const bloomParams = {
+            strength: 1.5,
+            radius: 1.0,
+            threshold: 0
+        };
+        this.bloomPass = new UnrealBloomPass(
+            new THREE.Vector2(window.innerWidth, window.innerHeight),
+            bloomParams.strength,
+            bloomParams.radius,
+            bloomParams.threshold
+        );
+        this.bloomComposer.addPass(this.bloomPass);
+
+        // 3. Final composite pass to blend base scene and bloom texture.
+        const finalPassMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+                baseTexture: { value: null },
+                bloomTexture: { value: this.bloomComposer.renderTarget2.texture }
+            },
+            vertexShader: /* glsl */`
+                varying vec2 vUv;
+                void main() {
+                    vUv = uv;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: /* glsl */`
+                uniform sampler2D baseTexture;
+                uniform sampler2D bloomTexture;
+                varying vec2 vUv;
+                void main() {
+                    vec4 baseColor = texture2D(baseTexture, vUv);
+                    vec4 bloomColor = texture2D(bloomTexture, vUv);
+                    gl_FragColor = baseColor + bloomColor;
+                }
+            `
+        });
+        this.finalPass = new ShaderPass(finalPassMaterial, 'baseTexture');
+        this.finalPass.needsSwap = true;
+        this.finalComposer.addPass(this.finalPass);
+
+        // Continue with the rest of your initialization:
         this.foliageManager = new FoliageManager(this.sceneManager, this.scene);
-        this.gpuParticleManager = new GPUParticleManager(this.renderer, this.scene);
         this.initializeGame(gameData);
         this.shieldManager = new ShieldManager(this.scene);
         this.setupEventListeners();
@@ -106,21 +170,20 @@ export class Game extends EventEmitter {
         this.terrainRenderer = new TerrainRenderer(this.scene, this.sceneManager.directionalLight, this.renderer);
         if (gameData.terrain) this.terrainRenderer.createTerrain(gameData.terrain);
         this.cameraManager = new CameraManager(this, this.terrainRenderer);
-        this.dmgManager = new DamageNumberManager(this.scene, this.cameraManager, './particles/damage_numbers.png');
+        // Update camera for the render passes in composers
+        this.renderPass.camera = this.cameraManager.camera;
+        this.bloomComposer.passes[0].camera = this.cameraManager.camera;
+
+        this.dmgManager = new DamageNumberManager(this.scene, this.cameraManager, './fonts/font.ttf');
         if (gameData.terrain) this.cameraManager.setView('thirdPerson');
         this.playerManager.init(gameData);
         this.inputManager = new GameInput(this, this.socket);
-        this.helicopterManager = new HelicopterManager(
+        this.helicopterController = new HelicopterController(
             this.scene,
-            this.sceneManager.loader,
-            this.terrainRenderer,
-            this.gpuParticleManager,
-            this.dmgManager,
-            this
+            this.socket,
         );
-        this.timelineManager = new ProjectileTimelineManager(this, this.helicopterManager);
-
-        this.sceneManager.loadEXR(this.scene, this.renderer, './hdri/hut.exr');
+        this.timelineManager = new ProjectileTimelineManager(this);
+        //this.sceneManager.loadEXR(this.scene, this.renderer, './hdri/hut.exr');
         this.sceneManager.loadTableModel(this.scene);
         if (gameData.turnTimeRemaining !== undefined) {
             this.turnDuration = gameData.turnDuration || 45000;
@@ -135,11 +198,10 @@ export class Game extends EventEmitter {
             });
         }
 
-        this.renderPass = new RenderPass(this.scene, this.cameraManager.camera);
-        this.composer.addPass(this.renderPass);
+        // Set up drone view pass if needed
         this.dronePass = new ShaderPass(DroneFeedShader);
         this.dronePass.material.uniforms.resolution.value.set(window.innerWidth, window.innerHeight);
-        
+
         if (gameData.currentRound !== 0) { 
             this.lightsUp();
             this.sceneManager.disposePlatformMesh();
@@ -161,6 +223,10 @@ export class Game extends EventEmitter {
         const pingManager = new PingManager(this.socket);
         pingManager.start();
         if (gameData.currentRound === 0) this.cameraManager.setView('preGame');
+
+        // Gamma correction and other passes can be added if needed:
+         const gammaCorrectionPass = new ShaderPass(GammaCorrectionShader);
+         this.finalComposer.addPass(gammaCorrectionPass);
     }
 
     // Called when the server sends a complete projectile timeline
@@ -180,44 +246,13 @@ export class Game extends EventEmitter {
     isGameOver() {
         return this.state === 'postgame';
     }
-
-    spawnExistingHelicopters(helicopterStates) {
-        // Expect each helicopter state to now include plannedPath and planStartTime.
-        helicopterStates.forEach((heliState) => {
-            this.spawnHelicopter({
-                id: heliState.id,
-                state: heliState,
-                plannedPath: heliState.plannedPath,
-                planStartTime: heliState.planStartTime
-            });
-            console.log(heliState.plannedPath);
-        });
-    }
-
-    spawnHelicopter(data) {
-        // data should include id, state, plannedPath, and planStartTime.
-        this.helicopterManager.spawnHelicopter(data);
-    }
-    
-    updateHelicopterPlan(data) {
-        // When the server sends updated plan data (including plannedPath and planStartTime).
-        this.helicopterManager.updateHelicopterPlan(data);
-    }
-    
-    handleHelicopterDamage(data) {
-        this.helicopterManager.handleHelicopterDamage(data);
-    }
-    
-    removeHelicopter(id) {
-        this.helicopterManager.removeHelicopter(id);
-    }
     
     doDroneView(){
-        this.composer.addPass(this.dronePass);
+        this.finalComposer.addPass(this.dronePass);
     }
 
     doNormalView(){
-        this.composer.removePass(this.dronePass);
+        this.finalComposer.removePass(this.dronePass);
     }
 
     addShieldToPlayer(playerId) {
@@ -235,8 +270,8 @@ export class Game extends EventEmitter {
     }
 
     lightsUp() {
-        this.sceneManager.directionalLight.intensity = 0.5;
-        this.sceneManager.ambientLight.intensity = 0.5;
+        this.sceneManager.directionalLight.intensity = 1.4;
+        this.sceneManager.ambientLight.intensity = 0.4;
     }
 
     loadNewTerrain(terrain) {
@@ -253,26 +288,7 @@ export class Game extends EventEmitter {
     setupEventListeners() {
         window.addEventListener('resize', () => this.handleResize());
         
-        // New helicopter events from the server:
-        this.socket.on('spawnHelicopter', data => {
-            // data includes id, state, plannedPath, and planStartTime
-            this.spawnHelicopter(data);
-        });
-
-          // Make sure you're listening for the path update events where you set up your socket handlers:
-        this.socket.on('helicopterPathUpdate', (data) => {
-            this.helicopterManager.updateHelicopterPath(data);
-        });
-
-        this.socket.on('helicopterDamage', data => {
-            this.handleHelicopterDamage(data);
-        });
-        this.socket.on('removeHelicopter', data => {
-            // data can be simply the helicopter id, or an object containing the id.
-            this.removeHelicopter(data.id || data);
-        });
         
-        // Existing event listeners:
         this.socket.on('shieldAdded', data => {
             const player = this.playerManager.getPlayer(data.playerId);
             if (player) {
@@ -359,16 +375,32 @@ export class Game extends EventEmitter {
         this.state = 'playing';
         this.emit('stateChange', this.state);
     }
-
-    handleProjectileFired(data) {
-        const projectile = new ClientProjectile(data, this.scene, this.gpuParticleManager, this.terrainRenderer);
-        this.projectiles.push(projectile); 
-        this.currentPlayerHasFired = true;
-    }
     
     handleTerrainPatch(patch) {
         if (this.terrainRenderer) {
             this.terrainRenderer.applyTerrainPatch(patch);
+        }
+    }
+
+    /**
+     * Traverse scene and replace material of non-bloom objects with a dark material.
+     */
+    darkenNonBloomed(obj) {
+        if (obj.isMesh) {
+            if ((obj.layers.mask & (1 << BLOOM_SCENE)) === 0) {
+                this.materialsBackup[obj.uuid] = obj.material;
+                obj.material = darkMaterial;
+            }
+        }
+    }
+
+    /**
+     * Restore the original material after the bloom pass.
+     */
+    restoreMaterial(obj) {
+        if (obj.isMesh && this.materialsBackup[obj.uuid]) {
+            obj.material = this.materialsBackup[obj.uuid];
+            delete this.materialsBackup[obj.uuid];
         }
     }
 
@@ -378,54 +410,54 @@ export class Game extends EventEmitter {
         const deltaTime = (currentTime - this.lastUpdateTime) / 1000;
         this.lastUpdateTime = currentTime;
         this.updateGameElements(deltaTime);
+
+
+        if (this.helicopterController) {
+            this.helicopterController.update(currentTime, deltaTime);
+            this.helicopterController.updateRotors(deltaTime);
+        }
+
         this.terrainRenderer.update();
-        this.composer.render();
+
+        // Selective bloom rendering:
+        // 1. Temporarily darken objects that are not on the bloom layer.
+        this.scene.traverse(obj => this.darkenNonBloomed(obj));
+        // 2. Render bloom composer.
+        // Store the current background
+        const oldBackground = this.scene.background;
+        // Remove the background so it isn’t rendered in the bloom pass
+        this.scene.background = null;
+        this.bloomComposer.render();
+        this.scene.background = oldBackground;
+        // 3. Restore original materials.
+        this.scene.traverse(obj => this.restoreMaterial(obj));
+
+        // Render final composite scene (base + bloom).
+        this.finalComposer.render();
     }
 
     updateGameElements(deltaTime) {
         this.fpsDisplay.update();
-        this.cameraManager.update(deltaTime);
-        this.dmgManager.update(deltaTime);
-        this.shieldManager.update();
-        this.gpuParticleManager.update(deltaTime);
-        this.playerManager.updatePlayers(deltaTime, this.cameraManager.camera);
-        this.timelineManager.update(deltaTime);
-        for (const proj of this.projectiles) {
-            proj.updateVisual(deltaTime);
+        if (this.cameraManager) {
+            this.cameraManager.update(deltaTime);
         }
-        this.updateTerrainShaders();
-        this.updateSunPosition(deltaTime);
+        if (this.dmgManager) {
+            this.dmgManager.update(deltaTime);
+        }
+        if (this.shieldManager) {
+            this.shieldManager.update();
+        }
+        if (this.timelineManager) {
+            this.timelineManager.particleSystem.update(deltaTime);
+            this.timelineManager.update(deltaTime);
+        }
+        if (this.playerManager) {
+            this.playerManager.updatePlayers(deltaTime, this.cameraManager.camera);
+        }
         this.terrainRenderer.updateReflections(this.renderer, this.scene, this.cameraManager.camera);
-        // Update helicopters based on their pre-planned paths.
-        this.helicopterManager.update(deltaTime);
-    }
-
-    updateSunPosition(deltaTime) {
-        if (!this.sceneManager.directionalLight) return;
-        const rotationAngle = (this.sunRotationRPM * Math.PI * 2 * deltaTime) / 60;
-        this.sceneManager.directionalLight.position.applyAxisAngle(
-            new THREE.Vector3(1, 0, 1),
-            rotationAngle
-        );
-        this.sceneManager.directionalLight.lookAt(0, 0, 0);
-        if (this.sceneManager.directionalLight.shadow) {
-            this.sceneManager.directionalLight.shadow.camera.updateProjectionMatrix();
-        }
+        this.updateTerrainShaders();
     }
     
-    updateProjectiles(deltaTime) {
-        this.projectiles.forEach(proj => {
-            proj.update(deltaTime);
-            if (proj.mesh) {
-                const pos = proj.mesh.position;
-                if (Math.abs(pos.x) > 4000 || Math.abs(pos.y) > 4000 || Math.abs(pos.z) > 4000) {
-                    proj.destroy();
-                }
-            }
-        });
-        this.projectiles = this.projectiles.filter(p => !p.isDestroyed);
-    }
-
     updateTerrainShaders() {
         if (this.terrainRenderer.currentTheme === 'grassland' && 
             this.terrainRenderer.surfacePlane && 

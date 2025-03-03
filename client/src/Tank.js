@@ -1,16 +1,8 @@
 // Tank.js
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-
-let BASE_SCALE = {
-    x: 80,
-    y: 20,
-    z: 2
-};
-
-// Animation settings
-let SCALE_FACTOR = 0.05; // How much to scale up/down (10% in this case)
-let ANIMATION_SPEED = 7; // Adjust this to make the animation faster or slower
+import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
+import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
 
 export class Tank {
     constructor(x, y, z) {
@@ -43,23 +35,40 @@ export class Tank {
         this.turretYawGroup.add(this.turretPitchGroup);
         this.loadBaseModel();
         this.loadTurretModel();
-        this.createNameTag();
+        
+        // Load a font for 3D text and create the name tag when ready.
+        this.fontLoader = new FontLoader();
+        this.font = null;
+        this.loadFont();
 
-        // --- Added Properties for Smooth Turret Movement ---
+        // --- Properties for Smooth Turret Movement ---
         // Current and target angles (in degrees)
         this.turretYawCurrent = 0;
         this.turretYawTarget = 0;
         this.turretPitchCurrent = 0;
         this.turretPitchTarget = 0;
 
-        // Control how quickly the turret rotates (degrees/sec).
-        // Adjust this value to make turret rotate faster or slower.
+        // Speed of turret rotation (degrees per second).
         this.turretLerpSpeed = 90; 
+    }
+
+    loadFont() {
+        // Adjust the path to your font file as needed.
+        this.fontLoader.load(
+            '/fonts/helvetiker_bold.typeface.json',
+            (font) => {
+                this.font = font;
+                this.createNameTag(); // Create the 3D text name tag once the font is loaded.
+            },
+            undefined,
+            (error) => {
+                console.error('Error loading font:', error);
+            }
+        );
     }
 
     getInventoryByType(type) {
         const result = [];
-        
         for (const [code, invItem] of Object.entries(this.inventory)) {
             const item = invItem.item;
             if (type === 'weapon' && item.category === 'Weapon') {
@@ -81,22 +90,19 @@ export class Tank {
                 });
             }
         }
-        
         return result;
     }
 
+    // Update the weapon selection
+    setSelectedWeapon(weaponCode) {
+        this.selectedWeapon = weaponCode;
+    }
 
-  // Update the weapon selection and notify the game
-  setSelectedWeapon(weaponCode) {
-    this.selectedWeapon = weaponCode;
-  }
-
-    // Similarly, add an item selection method
+    // Update the item selection
     setSelectedItem(itemCode) {
         this.selectedItem = itemCode;
     }
 
-    // Optionally, update your getter(s) if needed:
     getSelectedWeapon() {
         return this.selectedWeapon;
     }
@@ -105,7 +111,6 @@ export class Tank {
         return this.selectedItem;
     }
 
-
     applyColor(object3D, hexColor) {
         if (!object3D) return;
         object3D.traverse((child) => {
@@ -113,18 +118,16 @@ export class Tank {
                 child.castShadow = true;
                 child.receiveShadow = true;
                 if (child.material) {
-                    // Handle single or multiple materials
                     const materials = Array.isArray(child.material) ? child.material : [child.material];
                     materials.forEach(material => {
                         material.shadowSide = THREE.FrontSide;
-                        if (material.color) {
-                        }
                     });
                 }
             }
         });
-        if (this.nameTag) {
-            this.updateNameTagTexture();
+        // Update the text color if the name tag exists.
+        if (this.nameTag && this.nameTag.material) {
+            this.nameTag.material.color.set(hexColor ? hexColor : 0xffff00);
         }
     }
     
@@ -174,123 +177,39 @@ export class Tank {
     }
 
     createNameTag() {
-        const texture = this.makeTextTexture(this.name);
-        const spriteMaterial = new THREE.SpriteMaterial({
-            map: texture,
-            transparent: true,
-            depthTest: false,
-        });
-
-        this.nameTag = new THREE.Sprite(spriteMaterial);
-        this.nameTag.position.set(0, 40, 0);
-
-        // Create health bar
-        const healthTexture = this.makeHealthBarTexture(this.health);
-        const healthBarMaterial = new THREE.SpriteMaterial({
-            map: healthTexture,
-            transparent: true,
-            depthTest: false,
-        });
-
-        this.healthBar = new THREE.Sprite(healthBarMaterial);
-        this.healthBar.position.set(0, 45, 0);
-        this.healthBar.scale.set(50, 3, 1);
-        this.tankGroup.add(this.nameTag);
-        this.tankGroup.add(this.healthBar);
-    }
-
-    bigNameTag() {
-        BASE_SCALE.x = 120;
-        BASE_SCALE.y = 40;
-        BASE_SCALE.z = 15;
-        ANIMATION_SPEED = 6;
-        SCALE_FACTOR = 0.8;
-    }
-
-    littleNameTag() {
-        BASE_SCALE.x = 80;
-        BASE_SCALE.y = 20;
-        BASE_SCALE.z = 2;
-        ANIMATION_SPEED = 7;
-        SCALE_FACTOR = 0.05;
-    }
-
-    makeTextTexture(text) {
-        const canvas = document.createElement('canvas');
-        const context = canvas.getContext('2d');
-        canvas.width = 512;
-        canvas.height = 128;
-
-        context.clearRect(0, 0, canvas.width, canvas.height);
-        context.fillStyle = this.color ? '#' + this.color.toString(16).padStart(6, '0') : '#ffff00';        
-        context.font = '40px sans-serif';
-        context.textAlign = 'center';
-        context.textBaseline = 'middle';
-        context.fillText(text, canvas.width / 2, canvas.height / 2);
-
-        const texture = new THREE.Texture(canvas);
-        texture.needsUpdate = true;
-        return texture;
-    }
-
-    makeHealthBarTexture(health) {
-        const canvas = document.createElement('canvas');
-        const context = canvas.getContext('2d');
-        canvas.width = 256;
-        canvas.height = 2;
-
-        // Clear the canvas
-        context.clearRect(0, 0, canvas.width, canvas.height);
-
-        // Draw the background (gray)
-        context.fillStyle = '#444444';
-        context.fillRect(0, 0, canvas.width, canvas.height);
-
-        // Calculate health percentage
-        const healthPercent = health / 100;
-        const barWidth = canvas.width * healthPercent;
-
-        // Draw the health bar
-        context.fillStyle = this.getHealthColor(healthPercent);
-        context.fillRect(0, 0, barWidth, canvas.height);
-        const texture = new THREE.Texture(canvas);
-        texture.needsUpdate = true;
-        return texture;
-    }
-
-    getHealthColor(healthPercent) {
-        // Convert health percent to value between 0 and 1
-        healthPercent = Math.max(0, Math.min(1, healthPercent));
-        
-        let color;
-        
-        if (healthPercent > 0.6) {
-            // Blend between green and yellow
-            const t = (healthPercent - 0.6) / 0.4; // normalize to 0-1 range
-            const r = Math.round(255 * (1 - t));
-            const g = 255;
-            const b = 0;
-            color = `rgb(${r}, ${g}, ${b})`;
-        } else if (healthPercent > 0.2) {
-            // Blend between yellow and red
-            const t = (healthPercent - 0.2) / 0.4; // normalize to 0-1 range
-            const r = 255;
-            const g = Math.round(255 * t);
-            const b = 0;
-            color = `rgb(${r}, ${g}, ${b})`;
-        } else {
-            // Red for 20% or lower
-            color = '#ff0000';
+        // Remove existing name tag if it exists.
+        if (this.nameTag) {
+            this.tankGroup.remove(this.nameTag);
+            this.nameTag.geometry.dispose();
+            this.nameTag.material.dispose();
+            this.nameTag = null;
         }
-        
-        return color;
-    }
 
-    updateNameTagTexture() {
-        if (!this.nameTag) return;
-        const newTexture = this.makeTextTexture(this.name);
-        this.nameTag.material.map = newTexture;
-        this.nameTag.material.map.needsUpdate = true;
+        if (!this.font) {
+            console.warn('Font not loaded yet.');
+            return;
+        }
+
+        const textGeometry = new TextGeometry(this.name, {
+            font: this.font,
+            size: 10,
+            depth: 2,
+            curveSegments: 12,
+            bevelEnabled: false
+        });
+        textGeometry.computeBoundingBox();
+        const bbox = textGeometry.boundingBox;
+        const centerOffset = -0.5 * (bbox.max.x - bbox.min.x);
+
+        const textMaterial = new THREE.MeshStandardMaterial({ 
+            color: this.color ? this.color : 0xffff00,
+            depthTest: false, 
+          });
+        const textMesh = new THREE.Mesh(textGeometry, textMaterial);
+        textMesh.position.set(centerOffset, 40, 0);
+        textMesh.renderOrder = 1;
+        this.tankGroup.add(textMesh);
+        this.nameTag = textMesh;
     }
 
     /**
@@ -299,7 +218,6 @@ export class Tank {
      */
     setShield(newShield) {
         this.shield = newShield;
-        // Optionally, trigger any UI updates for the shield value here.
     }
     
     /**
@@ -308,13 +226,12 @@ export class Tank {
      */
     setArmor(newArmor) {
         this.armor = newArmor;
-        // Optionally, trigger any UI updates for the armor value here.
     }
     
-
     setName(newName) {
         this.name = newName;
-        this.updateNameTagTexture();
+        // Recreate the 3D text name tag with the new name.
+        this.createNameTag();
     }
 
     setColor(hexColor) {
@@ -325,14 +242,19 @@ export class Tank {
         if (this.turretMesh) {
             this.applyColor(this.turretMesh, hexColor);
         }
+        if (this.nameTag && this.nameTag.material) {
+            this.nameTag.material.color.set(hexColor ? hexColor : 0xffff00);
+        }
     }
 
     setCash(newCash) {
         this.cash = newCash;
     }
+
     getCash() {
         return this.cash;
     }
+
     getColor() {
         return this.color;
     }
@@ -355,21 +277,13 @@ export class Tank {
 
     setHealth(value) {
         this.health = value;
-        // Update health bar if it exists
-        if (this.healthBar) {
-            const newTexture = this.makeHealthBarTexture(this.health);
-            this.healthBar.material.map = newTexture;
-            this.healthBar.material.map.needsUpdate = true;
-        }
     }
 
     setPosition(positionOrX, y, z) {
         if (y === undefined && z === undefined) {
-            // Handle case where a position object is passed
             this.tankGroup.position.set(positionOrX.x, positionOrX.y, positionOrX.z);
             this.targetPosition.set(positionOrX.x, positionOrX.y, positionOrX.z);
         } else {
-            // Handle case where individual coordinates are passed
             this.tankGroup.position.set(positionOrX, y, z);
             this.targetPosition.set(positionOrX, y, z);
         }
@@ -419,12 +333,10 @@ export class Tank {
         this.isAlive = true;
         this.tankGroup.visible = true;
         
-        // Recreate name tag and health bar
-        if (!this.nameTag || !this.healthBar) {
-            this.createNameTag(); // This method creates both nameTag and healthBar
+        if (!this.nameTag) {
+            this.createNameTag();
         } else {
             this.nameTag.visible = true;
-            this.healthBar.visible = true;
         }
         
         this.setHealth(100);
@@ -437,21 +349,6 @@ export class Tank {
         return this.tankGroup;
     }
 
-    updateNameTagScale(deltaTime) {
-        // Update the elapsed time
-        this.elapsedTime += deltaTime;
-        const scaleModifier = 1 + (Math.sin(this.elapsedTime * ANIMATION_SPEED) + 1) / 2 * SCALE_FACTOR;
-        
-        // Apply the scale
-        this.nameTag.scale.set(
-            BASE_SCALE.x * scaleModifier,
-            BASE_SCALE.y * scaleModifier,
-            BASE_SCALE.z * scaleModifier
-        );
-    }
-
-    
-
     update(deltaTime, camera) {
         if (!this.isAlive) return;
         this.lerpPosition(deltaTime);
@@ -459,9 +356,9 @@ export class Tank {
         const yawStep = this.turretLerpSpeed * deltaTime;
         if (Math.abs(yawDiff) > yawStep) {
             this.turretYawCurrent += Math.sign(yawDiff) * yawStep;
-          } else {
+        } else {
             this.turretYawCurrent = this.turretYawTarget;
-          }
+        }
         this.turretYawGroup.rotation.y = THREE.MathUtils.degToRad(this.turretYawCurrent);
         let pitchDiff = this.turretPitchTarget - this.turretPitchCurrent;
         const pitchStep = this.turretLerpSpeed * deltaTime;
@@ -471,24 +368,19 @@ export class Tank {
             this.turretPitchCurrent = this.turretPitchTarget;
         }
         this.turretPitchGroup.rotation.x = THREE.MathUtils.degToRad(this.turretPitchCurrent);
-        if (camera) {
-            if (this.nameTag) {
-                this.updateNameTagScale(deltaTime);
-            }
+        if (this.nameTag) {
+            this.nameTag.lookAt(camera.position);
         }
-    }
+        }
 }
 
 function getShortestAngleDiff(current, target) {
     let diff = (target - current) % 360;
-    // Force into [0, 360) range
     if (diff < 0) {
-      diff += 360;
+        diff += 360;
     }
-    // Now force into [-180, 180] range
     if (diff > 180) {
-      diff -= 360;
+        diff -= 360;
     }
     return diff;
-  }
-  
+}

@@ -8,10 +8,10 @@ export class SprinklerWeapon {
     this.weaponCode = 'SW01';
 
     // Weapon configuration
-    this.circleSteps = 12;              // Total number of positions in the circle
+    this.circleSteps = 16;              // Total number of positions in the circle
     this.projectilesPerStep = 4;        // Number of projectiles per direction
-    this.projectilePowers = [50, 100, 150, 200]; // Power settings for each projectile
-    this.projectileDelay = 500;       
+    this.projectilePowers = [50, 100, 350, 500]; // Power settings for each projectile
+    this.projectileDelay = 600;       
     this.verticalAngle = Math.PI / 3;   // 45 degrees upward angle for all projectiles
     
     // Bounce configuration
@@ -154,7 +154,7 @@ export class SprinklerWeapon {
           
           // Auto-bounce settings
           preImpactBounces: 1, // Auto-bounce once
-          preImpactBouncePower: 50,
+          preImpactBouncePower: 150,
           bounciness: this.bounciness,
           upwardBias: this.upwardBias,
           minVerticalVelocity: this.minVerticalVelocity,

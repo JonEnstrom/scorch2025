@@ -78,6 +78,7 @@ export class PlayerManager {
         tank.id = id; // Assign unique identifier
         this.players[id] = tank;
         this.game.scene.add(tank.mesh);
+        if (playerData.health <= 0) tank.setPosition(10000, 10000, 10000);
 
         const currentDirection = new THREE.Vector3(0, 0, 1);
         currentDirection.applyQuaternion(tank.mesh.quaternion);

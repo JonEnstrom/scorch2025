@@ -15,7 +15,7 @@ export class BouncingBettyWeapon {
     
     // Physics settings
     this.timeFactor = 0.9;
-    this.bounceTimeFactor = 0.6; 
+    this.bounceTimeFactor = 0.8; 
     
     // Upward bias to ensure projectiles don't just roll along the ground
     this.upwardBias = 0.3; // Amount to bias the bounce upward

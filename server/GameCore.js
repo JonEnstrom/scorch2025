@@ -6,11 +6,11 @@ import ItemManager from './ItemManager.js';
 import { registerPlayerSocketHandlers } from './SocketHandlers.js';
 import { processInput } from './PlayerInput.js';
 import RoundManager, { GamePhase } from './RoundManager.js';
-import HelicopterManager from './HelicopterManager.js';
 import ArmorShieldManager from './ArmorShieldManager.js';
 import CPUPlayer from './CPUPlayer.js';
 import { checkAllPlayersReady, startReadyCountdown, cancelReadyCountdown } from './ReadyCheck.js';
 import PrecalculatedProjectileManager from './PrecalculatedProjectileManager.js';
+import { HelicopterManager } from './ClaudeHelicopterManager.js';
 
 export default class GameCore {
   constructor(
@@ -44,10 +44,9 @@ export default class GameCore {
       this.gameId,
       this.terrainManager,
       this.playerManager,
-      ArmorShieldManager,
+      this.helicopterManager
     );
-    this.helicopterManager.projectileManager = this.projectileManager;
-        this.roundManager = new RoundManager(this, totalRounds);
+    this.roundManager = new RoundManager(this, totalRounds);
 
     // Timer and state management
     this.readyCheckTimer = null;
@@ -288,13 +287,14 @@ export default class GameCore {
       totalRounds: this.roundManager.totalRounds,
     });
 
+if (this.helicopterManager) {
+  setTimeout(() => {
+    this.helicopterManager.sendHelicoptersToClient(userId);
+  }, 3000); // 3000 milliseconds = 3 seconds
+}
     // Send additional game data
     if (this.terrainManager.foliageSpawnPoints) {
       this.networking.io.to(this.gameId).emit('foliagePoints', this.terrainManager.foliageSpawnPoints);
-    }
-    if (this.helicopterManager) {
-      const helicopterStates = Array.from(this.helicopterManager.helicopters.values()).map((heli) => heli.getState());
-      socketWrapper.emit('spawnExistingHelicopters', helicopterStates);
     }
 
     this.broadcastGameState();
@@ -379,6 +379,8 @@ export default class GameCore {
 
     // Await the asynchronous terrain generation.
     this.terrainManager.terrainData = await this.terrainManager.generator.generate();
+
+    this.helicopterManager.start();
     
     // Generate foliage spawn points based on the newly generated terrain.
     this.terrainManager.foliageSpawnPoints = this.terrainManager.makeFoliageSpawnPoints({
@@ -562,7 +564,7 @@ export default class GameCore {
     this.terrainManager?.destroy();
     this.itemManager?.destroy();
     this.roundManager?.destroy();
-    this.helicopterManager?.destroy();
+    this.helicopterManager?.dispose();
     this.helicopterManager = null;
 
     this.clearEmptyGameTimer();

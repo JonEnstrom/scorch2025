@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 export default class VolleyWeapon {
   constructor(projectileManager) {
-    this.projectileCount = 10;
+    this.projectileCount = 20;
     this.spreadAngle = 0.1;
     this.projectileManager = projectileManager;
     this.id = uuidv4();

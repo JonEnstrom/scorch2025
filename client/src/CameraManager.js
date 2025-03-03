@@ -9,7 +9,7 @@ export class CameraManager {
         this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
         this.camera.position.set(0, 50, 50);
         this.camera.near = 1;
-        this.camera.far = 4000;
+        this.camera.far = 1000000;
         this.camera.updateProjectionMatrix();
 
         this.currentView = 'preGame';
@@ -223,7 +223,6 @@ export class CameraManager {
                     this.overheadCenter.z
                 );
                 this.targetRotation.set(-Math.PI / 2, 0, 0);
-                Object.values(this.game.playerManager.players).forEach(tank => tank.bigNameTag());
                 break;
 
             case 'thirdPerson':
@@ -232,16 +231,14 @@ export class CameraManager {
                 this.camera.updateProjectionMatrix();
                 this.lerpSpeed = 0.2;
                 this.pitch = this.thirdPersonDefaultPitch;
-                Object.values(this.game.playerManager.players).forEach(tank => tank.littleNameTag());
                 break;
 
             case 'chase':
-                this.camera.fov = 80; 
+                this.camera.fov = 100; 
                 this.game.doNormalView();
                 this.camera.updateProjectionMatrix();
-                this.lerpSpeed = 0.03;
-                this.rotationLerpSpeed = 0.03;
-                Object.values(this.game.playerManager.players).forEach(tank => tank.bigNameTag());
+                this.lerpSpeed = 0.06;
+                this.rotationLerpSpeed = 0.05;
                 break;
 
             case 'projectile':
@@ -250,7 +247,6 @@ export class CameraManager {
                 this.camera.updateProjectionMatrix();
                 this.lerpSpeed = 0.1; 
                 this.rotationLerpSpeed = 0.01;
-                Object.values(this.game.playerManager.players).forEach(tank => tank.bigNameTag());
                 break;
         }
     }

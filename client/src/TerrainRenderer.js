@@ -1,7 +1,7 @@
 // client/src/terrainRenderer.js
 import * as THREE from 'three';
 import { WaterShader } from './shaders/WaterShader.js';
-import { HeightBlendedShader } from './shaders/HeighBlendedShader.js';
+import { HeightBlendedShader } from './shaders/HeightBlendedShader.js';
 import { ScorchShader } from './shaders/ScorchShader.js';
 
 export class TerrainRenderer {
@@ -9,6 +9,7 @@ export class TerrainRenderer {
     this.scene = scene;
     this.lightRef = lightRef;
     this.renderer = renderer;
+    this.heightData = null;
     
     this.geometry = null;
     this.modificationQueue = [];
@@ -56,19 +57,19 @@ export class TerrainRenderer {
     };
 
     this.thresholds = {
-      water: -5,
-      low: 2,
+      water: 0,
+      low: 4,
       mid: 10,
       high: 20,
       blendRange: 5.0
     };
 
     this.uvScales = {
-      water: 0.005,
-      low: 0.005,
-      mid: 0.005,
-      high: 0.005,
-      mountain: 0.005
+      water: 0.05,
+      low: 0.05,
+      mid: 0.05,
+      high: 0.05,
+      mountain: 0.05
     };
 
     this.intersectionRT = new THREE.WebGLRenderTarget(4096, 4096, {
@@ -80,7 +81,8 @@ export class TerrainRenderer {
 
     const distanceShader = {
       uniforms: {
-        uWaterLevel: { value: -5.0 },  // match your water plane’s Y level
+        uWaterLevel: { value: -2 },  // match your water plane's Y level
+        uTransitionWidth: { value: 3.0 }  // control the width of the gradient (larger = wider gradient)
       },
       vertexShader: `
         varying float vTerrainHeight;
@@ -92,18 +94,24 @@ export class TerrainRenderer {
       `,
       fragmentShader: `
         uniform float uWaterLevel;
+        uniform float uTransitionWidth;
         varying float vTerrainHeight;
         void main() {
           // distance above/below water
-          float dist = vTerrainHeight - uWaterLevel; 
-          dist = clamp((dist + 20.0) / 40.0, 0.0, 1.0);
-    
+          float dist = vTerrainHeight - uWaterLevel;
+          
+          // Create a smooth transition centered at the water level
+          // A value of 0.5 means exactly at water level
+          // 0.0 means deep underwater, 1.0 means high above water
+          float halfWidth = uTransitionWidth * 0.5;
+          float gradient = clamp((dist + halfWidth) / uTransitionWidth, 0.0, 1.0);
+          
           // We'll store it in the G channel so it reads as .y in the water shader
-          gl_FragColor = vec4(0.0, dist, 0.0, 1.0);
-        }      `
+          gl_FragColor = vec4(0.0, gradient, 0.0, 1.0);
+        }
+      `
     };
-    this.intersectionMaterial = new THREE.ShaderMaterial(distanceShader);
-  }
+    this.intersectionMaterial = new THREE.ShaderMaterial(distanceShader);  }
   
   /**
    * Loads the 5 textures used for the height blending (per theme).
@@ -123,7 +131,7 @@ export class TerrainRenderer {
       this.heightTextures.water            = loader.load('textures/desert/desert_mountain.jpg');
       this.heightTextures.waterNormal      = loader.load('textures/desert/desert_mountain_normal.jpg');
 
-      this.thresholds = { water: -5, low: 40, mid:80, high: 200, blendRange: 50.0 };
+      this.thresholds = { water: -5, low: 4, mid:8, high: 20, blendRange: 5.0 };
 
     } else if (theme === 'arctic') {
       this.heightTextures.water            = loader.load('textures/arctic/arctic_ice.jpg');
@@ -137,7 +145,7 @@ export class TerrainRenderer {
       this.heightTextures.mountain         = loader.load('textures/arctic/arctic_mountain.jpg');
       this.heightTextures.mountainNormal   = loader.load('textures/arctic/arctic_mountain_normal.jpg');
 
-      this.thresholds = { water: -5, low: 40, mid: 85, high: 200, blendRange: 50.0 };
+      this.thresholds = { water: -5, low: 4, mid: 8.5, high: 20, blendRange: 5.0 };
 
     } else {
       // Grassland (default)
@@ -152,14 +160,14 @@ export class TerrainRenderer {
       this.heightTextures.mountain         = loader.load('textures/grassland/grassland_mountain.jpg');
       this.heightTextures.mountainNormal   = loader.load('textures/grassland/grassland_mountain_normal.jpg');
 
-      this.thresholds = { water: -7, low: 40, mid: 80, high: 200, blendRange: 50.0 };
+      this.thresholds = { water: -3, low: 4, mid: 8, high: 20, blendRange: 5.0 };
     }
 
     // Wrap mode, repeats, etc.:
     for (const key in this.heightTextures) {
       const tex = this.heightTextures[key];
       tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-      tex.repeat.set(25,25);
+      tex.repeat.set(2.5,2.5);
     }
   }
 
@@ -192,9 +200,6 @@ export class TerrainRenderer {
     this.geometry.computeVertexNormals();
   }
 
-  /**
-   * Creates BOTH copies of the terrain geometry using the new blending shader.
-   */
   async createTerrain(terrainData) {
     this.dispose();
     this.currentTheme = terrainData.theme || 'grassland';
@@ -202,28 +207,66 @@ export class TerrainRenderer {
 
     try {
       const heightDataFloat32 = new Float32Array(terrainData.heightData);
+      this.heightData = heightDataFloat32;
       const segments = terrainData.segments;
       const width = terrainData.width;
       const depth = terrainData.depth;
 
-      this.geometry = new THREE.PlaneGeometry(width, depth, segments, segments);
-      const positions = this.geometry.attributes.position.array;
+      this.terrainWidth = width;        
+      this.terrainDepth = depth;        
+      this.terrainSegments = segments;   
+      
+      // calculate and store the max height for physics
+      this.terrainMaxHeight = Math.max(...heightDataFloat32);
 
-      for (let i = 0, j = 0; i < positions.length; i += 3, j++) {
-        positions[i + 2] = heightDataFloat32[j];
+      // Create a geometry in the XZ plane instead of XY plane
+      this.geometry = new THREE.BufferGeometry();
+      
+      // Create position attribute for XZ plane with Y as height
+      const vertices = [];
+      const uvs = [];
+      
+      for (let z = 0; z <= segments; z++) {
+        for (let x = 0; x <= segments; x++) {
+          // Compute XZ position
+          const xPos = (x / segments) * width - width / 2;
+          const zPos = (z / segments) * depth - depth / 2;
+          
+          // Get height from heightData (Y up)
+          const heightIndex = z * (segments + 1) + x;
+          const yPos = heightDataFloat32[heightIndex];
+          
+          // Add vertex (XYZ order)
+          vertices.push(xPos, yPos, zPos);
+          
+          // Add UV coordinate
+          uvs.push(x / segments, z / segments);
+        }
       }
-
+      
+      // Create indices for triangles
+      const indices = [];
+      for (let z = 0; z < segments; z++) {
+        for (let x = 0; x < segments; x++) {
+          const a = z * (segments + 1) + x;
+          const b = z * (segments + 1) + (x + 1);
+          const c = (z + 1) * (segments + 1) + x;
+          const d = (z + 1) * (segments + 1) + (x + 1);
+          
+          // First triangle
+          indices.push(a, c, b);
+          // Second triangle
+          indices.push(b, c, d);
+        }
+      }
+      
+      // Set the attributes
+      this.geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+      this.geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+      this.geometry.setIndex(indices);
+      
       this.geometry.computeVertexNormals();
-      this.geometry.attributes.position.needsUpdate = true;
 
-      this.material = new THREE.ShaderMaterial({
-        uniforms: THREE.UniformsUtils.clone(HeightBlendedShader.uniforms),
-        vertexShader: HeightBlendedShader.vertexShader,
-        fragmentShader: HeightBlendedShader.fragmentShader,
-        lights: false,
-      });
-
-      // Create a ShaderMaterial with our height-blending shader
       this.material = new THREE.ShaderMaterial({
         uniforms: THREE.UniformsUtils.clone(HeightBlendedShader.uniforms),
         vertexShader: HeightBlendedShader.vertexShader,
@@ -276,27 +319,25 @@ export class TerrainRenderer {
       this.material.uniforms.scorchTexture.value = scorchTexture;
 
       this.mesh = new THREE.Mesh(this.geometry, this.material);
-      this.mesh.rotation.x = -Math.PI / 2;
       this.mesh.receiveShadow = true;
       this.scene.add(this.mesh);
 
       this.createSurfacePlane(terrainData);
 
+      // Update the intersection camera to look downward for Y-up terrain
       this.intersectionCamera = new THREE.OrthographicCamera(
-        -width/2, width/2, depth/2, -depth/2, -1000, 1000
+        -width/2, width/2, depth/2, -depth/2, -500, 500
       );
-      this.intersectionCamera.position.set(0, 0, 0);
-      this.intersectionCamera.rotation.z = -Math.PI/2;
-      this.intersectionCamera.lookAt(0, 0, 0);
+      this.intersectionCamera.position.set(0, 100, 0); // Position above terrain
+      this.intersectionCamera.lookAt(0, 0, 0); // Look down at origin
+      
       this.intersectionScene = new THREE.Scene();
       this.intersectionMesh = new THREE.Mesh(this.geometry, this.intersectionMaterial);
-      this.intersectionMesh.rotation.x = -Math.PI/2;
       this.intersectionScene.add(this.intersectionMesh);
 
       this.renderer.setRenderTarget(this.intersectionRT);
       this.renderer.render(this.intersectionScene, this.intersectionCamera);
       this.renderer.setRenderTarget(null);
-
       return true;
     } catch (error) {
       console.error('Error creating terrain:', error);
@@ -343,13 +384,12 @@ export class TerrainRenderer {
         uniforms: THREE.UniformsUtils.clone(WaterShader.uniforms),
         vertexShader: WaterShader.vertexShader,
         fragmentShader: WaterShader.fragmentShader,
-        transparent: true
+        transparent: true,
       });
       planeMaterial.uniforms.tReflection.value    = this.reflectionRenderTarget.texture;
       planeMaterial.uniforms.tEnvironment.value   = this.environmentMap;
       if (planeMaterial instanceof THREE.ShaderMaterial) {
         planeMaterial.uniforms.tIntersections.value = this.intersectionRT.texture;
-        // The WaterShader example already has `tIntersections` in the uniforms
         planeMaterial.uniforms.uIntersectionTextureSize.value = 1.0; 
       }
 
@@ -361,27 +401,27 @@ export class TerrainRenderer {
       planeMaterial = new THREE.MeshPhysicalMaterial({
         map: diffuseMap,
         normalMap: normalMap,
-        transparent: true,
+        transparent: false,
         roughness: 0.5,
         metalness: 0.5,
       });
-      planeMaterial.normalScale.set(1.5, 1.5);
       diffuseMap.wrapS = diffuseMap.wrapT = THREE.RepeatWrapping;
       normalMap.wrapS  = normalMap.wrapT  = THREE.RepeatWrapping;
-      diffuseMap.repeat.set(10, 10);
-      normalMap.repeat.set(10, 10);
+      diffuseMap.repeat.set(4, 4);
+      normalMap.repeat.set(4, 4);
 
     } else {
       // fallback
       return;
     }
 
-    const planeGeometry = new THREE.PlaneGeometry(terrainData.width, terrainData.depth, 1, 1);
-    planeGeometry.rotateX(-Math.PI / 2);
+    // Create plane in XZ plane for Y-up terrain
+    const planeGeometry = new THREE.PlaneGeometry(terrainData.width, terrainData.depth, 400, 400);
+    planeGeometry.rotateX(-Math.PI / 2); // Still need to rotate the plane to make it horizontal
     planeGeometry.renderOrder = 0;
 
     this.surfacePlane = new THREE.Mesh(planeGeometry, planeMaterial);
-    this.surfacePlane.position.y = -5;
+    this.surfacePlane.position.y = -2; 
     this.surfacePlane.receiveShadow = true;
     this.scene.add(this.surfacePlane);
   }
@@ -435,19 +475,24 @@ export class TerrainRenderer {
 
   getHeightAtPosition(x, z) {
     if (!this.geometry) return 0;
+    
+    const positions = this.geometry.attributes.position.array;
+    const segments = this.terrainSegments;
     const worldSize = {
-      width: this.geometry.parameters.width,
-      height: this.geometry.parameters.height
+      width: this.terrainWidth,
+      height: this.terrainDepth
     };
     
-    const segments = this.geometry.parameters.widthSegments;
     const gridX = Math.round((x + worldSize.width/2) * (segments/worldSize.width));
     const gridZ = Math.round((z + worldSize.height/2) * (segments/worldSize.height));
     
     if (gridX < 0 || gridX > segments || gridZ < 0 || gridZ > segments) return 0;
     
     const index = gridZ * (segments + 1) + gridX;
-    return this.geometry.attributes.position.array[index * 3 + 2];
+    const vertexIndex = index * 3;
+    
+    // Y is the height now (index + 1 because it's the second component)
+    return positions[vertexIndex + 1];
   }
 
   applyTerrainPatch(patch) {
@@ -457,22 +502,73 @@ export class TerrainRenderer {
     }
     const positions = this.geometry.attributes.position.array;
     for (const {index, height} of patch) {
-      positions[index * 3 + 2] = height;
+      // Y is the height (position 1 in XYZ coordinates)
+      positions[index * 3 + 1] = height;
+      
+      // Also update the heightData array
+      if (this.heightData) {
+        this.heightData[index] = height;
+      }
     }
     this.geometry.attributes.position.needsUpdate = true;
-    this.mesh.position.y = 0;
+    
+    // Notify physics that terrain was modified
+    if (this.game && this.game.physicsManager) {
+      this.game.physicsManager.updateTerrainCollision(patch);
+    }
+    this.updateNormals();
   }
 
+  /**
+ * Creates a debug plane showing the intersection render target texture
+ * @param {boolean} show - Whether to create and show the debug plane
+ * @returns {void}
+ */
+createDebugPlane(show = true) {
+  // Remove any existing debug plane
+  if (this.debugPlane) {
+    this.scene.remove(this.debugPlane);
+    this.debugPlane.geometry.dispose();
+    this.debugPlane.material.dispose();
+    this.debugPlane = null;
+  }
+  
+  // If show is false, just remove and return
+  if (!show) return;
+  
+  // Create a plane geometry for the debug view
+  const planeGeometry = new THREE.PlaneGeometry(100, 100);
+  
+  // Create a material that uses the intersection render target
+  const debugMaterial = new THREE.MeshBasicMaterial({
+    map: this.intersectionRT.texture,
+    side: THREE.DoubleSide
+  });
+  
+  // Create the mesh and position it at 0, 100, 0
+  this.debugPlane = new THREE.Mesh(planeGeometry, debugMaterial);
+  this.debugPlane.position.set(0, 100, 0);
+  
+  // Make it face down
+  this.debugPlane.rotation.x = Math.PI / 2;
+  
+  // Add to scene
+  this.scene.add(this.debugPlane);
+  
+  console.log('Debug plane created at position (0, 100, 0)');
+}
+  
   modifyTerrain(centerX, centerZ, radius, operation = 'flatten', targetHeight = null) {
+
     if (!this.geometry?.attributes.position) {
       console.warn('No terrain geometry to modify!');
       return;
     }
   
     const positions = this.geometry.attributes.position.array;
-    const segments = this.geometry.parameters.widthSegments;
-    const width = this.geometry.parameters.width;
-    const depth = this.geometry.parameters.height;
+    const segments = this.terrainSegments;
+    const width = this.terrainWidth;
+    const depth = this.terrainDepth;
   
     if (operation === 'flatten' && targetHeight === null) {
       targetHeight = this.getHeightAtPosition(centerX, centerZ);
@@ -487,7 +583,8 @@ export class TerrainRenderer {
         if (distance > radius) continue;
         
         const vertexIndex = (z*(segments+1) + x)*3;
-        let newHeight = positions[vertexIndex + 2];
+        // Y is the height now (index + 1)
+        let newHeight = positions[vertexIndex + 1];
         
         switch(operation) {
           case 'flatten':
@@ -507,7 +604,14 @@ export class TerrainRenderer {
             break;
         }
         
-        positions[vertexIndex + 2] = newHeight;
+        // Update Y position for height
+        positions[vertexIndex + 1] = newHeight;
+        
+        // Update the height data array
+        if (this.heightData) {
+          const dataIndex = z * (segments + 1) + x;
+          this.heightData[dataIndex] = newHeight;
+        }
       }
     }
   

@@ -15,7 +15,7 @@ export class BouncingBettyWeapon {
     
     // Physics settings
     this.timeFactor = 0.9;
-    this.bounceTimeFactor = 0.6; 
+    this.bounceTimeFactor = 0.8; 
     
     // Upward bias to ensure projectiles don't just roll along the ground
     this.upwardBias = 0.3; // Amount to bias the bounce upward
@@ -49,7 +49,7 @@ export class BouncingBettyWeapon {
       
       // Faster travel time with same trajectory
       timeFactor: this.timeFactor,
-      gravity: -300 // Standard gravity
+      gravity: -30 // Standard gravity
     }];
   
     // 1) Precompute the flight
@@ -113,7 +113,7 @@ export class BouncingBettyWeapon {
       impactData.position,
       impactData.playerId,
       currentBounce + 1,
-      200,  // Base power
+      20,  // Base power
       incomingDirection,
       surfaceNormal
     );
@@ -195,7 +195,7 @@ export class BouncingBettyWeapon {
       
       // Custom physics for the bounce
       timeFactor: bounceTimeFact,
-      gravity: -280 // Slightly reduced gravity for higher arcs
+      gravity: -28 // Slightly reduced gravity for higher arcs
     };
   }
 

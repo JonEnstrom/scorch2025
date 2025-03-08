@@ -145,11 +145,29 @@ export default class ClusterWeapon {
       const direction = this._getClusterDirection(carrierVelocity);
       const isFinal = (i === this.clusterCount - 1); // Mark last as final
       
+      // Determine bounce behavior based on the index
+      let preImpactBounces = 0;
+      let preImpactBouncePower = 0;
+      
+      if (i < this.clusterCount / 3) {
+        // First third: No bounces (original behavior)
+        preImpactBounces = 0;
+        preImpactBouncePower = 0;
+      } else if (i < (this.clusterCount * 2) / 3) {
+        // Second third: 1 bounce
+        preImpactBounces = 1;
+        preImpactBouncePower = 20;
+      } else {
+        // Last third: 2 bounces
+        preImpactBounces = 2;
+        preImpactBouncePower = 20;
+      }
+      
       // Create cluster projectile with parent momentum plus spread
       const subData = {
         startPos: apexPos.clone(),
         direction: direction,
-        power: 200,
+        power: 20,
         isFinalProjectile: isFinal,
         projectileStyle: 'bomblet',
         explosionSize: 1,
@@ -158,7 +176,9 @@ export default class ClusterWeapon {
         craterSize: 25,
         baseDamage: 40, 
         weaponId: this.id, 
-        weaponCode: this.weaponCode
+        weaponCode: this.weaponCode,
+        preImpactBounces: preImpactBounces,
+        preImpactBouncePower: preImpactBouncePower
       };
       this.projectileManager.simulateSubProjectile(subData, spawnTime, timeline);
     }

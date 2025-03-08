@@ -13,11 +13,11 @@ const FOLIAGE_CONFIG = {
     },
     {
       minHeight: -5,
-      maxHeight: 150,
+      maxHeight: 15,
       foliageIds: ['grasslands_plant_2']
     },
     {
-      minHeight: 150,
+      minHeight: 15,
       maxHeight: Number.POSITIVE_INFINITY,
       foliageIds: ['grasslands_plant_3']
     }
@@ -25,16 +25,16 @@ const FOLIAGE_CONFIG = {
   desert: [
     {
       minHeight: Number.NEGATIVE_INFINITY,
-      maxHeight: 40,
+      maxHeight: 4,
       foliageIds: ['desert_cactus']
     },
     {
-      minHeight: 60,
-      maxHeight: 150,
+      minHeight: 6,
+      maxHeight: 15,
       foliageIds: ['desert_cactus2']
     },
     {
-      minHeight: 200,
+      minHeight: 20,
       maxHeight: Number.POSITIVE_INFINITY,
       foliageIds: ['desert_plant_1']
     }
@@ -42,16 +42,16 @@ const FOLIAGE_CONFIG = {
   arctic: [
     {
       minHeight: Number.NEGATIVE_INFINITY,
-      maxHeight: 50,
+      maxHeight: 5,
       foliageIds: []
     },
     {
-      minHeight: 50,
-      maxHeight: 300,
+      minHeight: 5,
+      maxHeight: 30,
       foliageIds: ['snowy_stump']
     },
     {
-      minHeight: 300,
+      minHeight: 30,
       maxHeight: Number.POSITIVE_INFINITY,
       foliageIds: []
     }
@@ -132,10 +132,10 @@ export default class TerrainManager {
   makeFoliageSpawnPoints({
     theme = 'grassland',
     maxSpots = 500,
-    minDistance = 20,
+    minDistance = 10,
     gridSize = 1,
-    width = 2400,
-    depth = 2400,
+    width = 240,
+    depth = 240,
     slopeThreshold = 2,
     maxAttemptsMultiplier = 4
   } = {}) {
@@ -172,10 +172,11 @@ export default class TerrainManager {
       if (tooClose) continue;
       const y = this.getHeightAtPosition(pos.x, pos.z);
       const foliageId = this.pickFoliageIdForTheme(theme, y);
-      let scale = 1.0;
+      let scale = 0.1;
       if (foliageId && FOLIAGE_SCALE_CONFIG[foliageId]) {
         const { minScale, maxScale } = FOLIAGE_SCALE_CONFIG[foliageId];
         scale = minScale + Math.random() * (maxScale - minScale);
+        scale /= 10;
       }
       if (foliageId) {
         spots.push({
@@ -183,7 +184,7 @@ export default class TerrainManager {
           y,
           z: pos.z,
           foliageId,
-          scale
+          scale,
         });
       }
     }

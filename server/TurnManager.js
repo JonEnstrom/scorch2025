@@ -172,8 +172,8 @@ export default class TurnManager {
   broadcastTurnUpdate() {
     this.io.to(this.gameId).emit('turnUpdate', {
       currentPlayerId: this.getCurrentPlayerId(),
-      turnDuration: this.getTimeRemaining(),
-      turnStart: Date.now() // server timestamp
+      turnTimeRemaining: this.getTimeRemaining(),
+      turnStartTime: Date.now() // server timestamp
     });  
   }
 

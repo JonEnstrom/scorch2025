@@ -8,20 +8,20 @@ export default class SpawnManager {
         this.players = players;
         
         // Configuration constants
-        this.MAP_SIZE = 1600;
-        this.MAP_BOUNDARY = 800;
-        this.MIN_EDGE_DISTANCE = 50;
-        this.MIN_PLAYER_DISTANCE = 50;
-        this.MIN_HEIGHT = 3;
-        this.MAX_ATTEMPTS = 100;
+        this.MAP_SIZE = 240;
+        this.MAP_BOUNDARY = 120;
+        this.MIN_EDGE_DISTANCE = 20;
+        this.MIN_PLAYER_DISTANCE = 40;
+        this.MIN_HEIGHT = 1;
+        this.MAX_ATTEMPTS = 200;
         const y_offset = 0;
         // Pre-game spawn system
         this.PREGAME_SPAWN_POINTS = Array.from({length: 8}, (_, i) => {
             const angle = (2 * Math.PI * i) / 8;
             return {
-                x: 100 * Math.cos(angle),
+                x: 10 * Math.cos(angle),
                 y: y_offset,
-                z: 100 * Math.sin(angle)
+                z: 10 * Math.sin(angle)
             };
         });        
         // Track which pre-game spawn points are in use

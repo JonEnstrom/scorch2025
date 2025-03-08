@@ -1,4 +1,4 @@
-export class GameInput {
+export class InputManager {
     constructor(game, socket) {
         this.game = game;
         this.socket = socket;
@@ -37,7 +37,6 @@ export class GameInput {
             }
             else if (event.code === 'KeyC' && !this.inventoryOpen) {
                 this.game.cameraManager.setView('overhead');
-                Object.values(this.game.playerManager.players).forEach(tank => tank.bigNameTag());
             }
         });
 
@@ -50,7 +49,6 @@ export class GameInput {
                 } else {
                     this.game.cameraManager.setView('thirdPerson');
                 }
-                Object.values(this.game.playerManager.players).forEach(tank => tank.littleNameTag());
             }
         });
 

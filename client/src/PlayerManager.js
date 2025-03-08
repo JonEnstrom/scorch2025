@@ -4,12 +4,14 @@ import * as THREE from 'three';
 
 export class PlayerManager {
     constructor(game) {
+        this.physicsManager = null;
         this.game = game;
         this.players = {};
         this.currentPlayerId = null;
         this.playerId = null;
         this.isPreGame = null;
         this.subscribers = {};
+        this.pregameSpotlights = []; // Store references to all pregame spotlights
     }
 
     // Subscribe to an event
@@ -52,6 +54,8 @@ export class PlayerManager {
         if (state.power !== undefined) tank.setPower(state.power);
         if (state.name !== undefined) tank.setName(state.name);
         if (state.health !== undefined) tank.setHealth(state.health);
+        if (state.armor !== undefined) tank.setArmor(state.armor);
+        if (state.shield !== undefined) tank.setShield(state.shield);
         if (state.color !== undefined) tank.setColor(state.color);
         if (state.cash !== undefined) tank.setCash(state.cash);
         if (state.inventory !== undefined) tank.setInventory(state.inventory);
@@ -72,12 +76,12 @@ export class PlayerManager {
     addPlayer(id, playerData, isPreGame) {
         if (this.players[id]) return;
         const pos = playerData.position;
-        const tank = new Tank(pos.x, pos.y, pos.z);
-        // Use unified update function (using target position update)
+        const tank = new Tank(pos.x, pos.y, pos.z, this.game);
         this.updateTankProperties(tank, playerData, { actualPosition: false });
         tank.id = id; // Assign unique identifier
         this.players[id] = tank;
         this.game.scene.add(tank.mesh);
+        if (playerData.health <= 0) tank.setPosition(10000, 10000, 10000);
 
         const currentDirection = new THREE.Vector3(0, 0, 1);
         currentDirection.applyQuaternion(tank.mesh.quaternion);
@@ -88,16 +92,22 @@ export class PlayerManager {
             this.game.cameraManager.setTarget(tank.mesh);
         }
         if (isPreGame) {
-            const spotlight = new THREE.SpotLight(0xffffff, 5);
-            spotlight.position.set(pos.x, pos.y + 70, pos.z); // Position above scene
+            const spotlight = new THREE.SpotLight(0xffffff, 15);
+            spotlight.position.set(pos.x, pos.y + 7, pos.z); // Position above scene
             spotlight.angle = Math.PI / 6; // Cone angle in radians
             spotlight.penumbra = 0.9; // Softness of the edges (0-1)
             spotlight.decay = 0; // Light decay
-            spotlight.distance = 100; // Maximum distance
+            spotlight.distance = 10; // Maximum distance
             spotlight.castShadow = true; // Enable shadow casting
             this.game.scene.add(spotlight);
             spotlight.target.position.set(pos.x, pos.y, pos.z);
             this.game.scene.add(spotlight.target);
+            
+            // Store references to the spotlight and its target
+            this.pregameSpotlights.push({
+                light: spotlight,
+                target: spotlight.target
+            });
         } else {
             this.game.lightsUp();
         }
@@ -112,6 +122,7 @@ export class PlayerManager {
     }
 
     handlePlayerJoined(data) {
+        if (data.isSpectator) return;
         this.isPreGame = data.isPreGame;
         this.addPlayer(data.id, data.state, this.isPreGame);
         console.log(`Player joined: ${data.id}`);
@@ -158,7 +169,6 @@ export class PlayerManager {
             power: state.power,
         });
         this.emit("playerListUpdated", this.getAllPlayersInfo());
-
     }
 
     getAllPlayersInfo() {
@@ -177,9 +187,11 @@ export class PlayerManager {
         const playerHit = this.players[data.id];
         if (!playerHit || !playerHit.isAlive) return;
         if (!playerHit) return;
-        playerHit.setHealth(data.currentHealth);
+        playerHit.setHealth(data.damageDistribution.remainingHealth);
+        playerHit.setArmor(data.damageDistribution.remainingArmor);
+        playerHit.setShield(data.damageDistribution.remainingShield);
         this.game.dmgManager.createDamageNumber(data.damage, playerHit.mesh.position, {
-            initialVelocity: 150,
+            initialVelocity: 15,
             drag: 0.98,
             lifetime: 5.0
         });
@@ -210,5 +222,33 @@ export class PlayerManager {
 
     isLocalPlayer(id) {
         return this.playerId === id;
+    }
+
+    // New method to clean up pregame spotlights
+    cleanupPregameSpotlights() {
+        if (this.pregameSpotlights.length > 0) {
+            console.log(`Cleaning up ${this.pregameSpotlights.length} pregame spotlights`);
+            
+            this.pregameSpotlights.forEach(spotlightObj => {
+                // Remove spotlight and target from scene
+                this.game.scene.remove(spotlightObj.light);
+                this.game.scene.remove(spotlightObj.target);
+                
+                // Dispose of any resources
+                spotlightObj.light.dispose();
+            });
+            
+            // Clear the array
+            this.pregameSpotlights = [];
+        }
+    }
+    
+    // Method to call when game starts
+    handleGameStart() {
+        // Clean up all pregame spotlights
+        this.cleanupPregameSpotlights();
+        
+        // Turn on game lights
+        this.game.lightsUp();
     }
 }

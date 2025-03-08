@@ -1,25 +1,28 @@
-// Tank.js
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
+import { TankUI } from './tankUI.js';
 
-let BASE_SCALE = {
-    x: 80,
-    y: 20,
-    z: 2
-};
-
-// Animation settings
-let SCALE_FACTOR = 0.05; // How much to scale up/down (10% in this case)
-let ANIMATION_SPEED = 7; // Adjust this to make the animation faster or slower
+function getShortestAngleDiff(current, target) {
+    let diff = (target - current) % 360;
+    if (diff < 0) {
+        diff += 360;
+    }
+    if (diff > 180) {
+        diff -= 360;
+    }
+    return diff;
+}
 
 export class Tank {
-    constructor(x, y, z) {
+    constructor(x, y, z, game) {
+        this.game = game;
         this.tankGroup = new THREE.Group();
         this.tankGroup.position.set(x, y, z);
         this.elapsedTime = 0;
-        this.power = 200;
-        this.turretPitch = 0;  // in degrees
-        this.turretYaw = 0;    // in degrees
+        this.power = 20;
+        this.turretPitch = 0;
+        this.turretYaw = 0;
         this.health = 100;
         this.armor = 0;
         this.shield = 0;
@@ -28,38 +31,64 @@ export class Tank {
         this.cash = 0;
         this.isAlive = true;
         this.inventory = {};
-        this.selectedWeapon = "PS01";
+        this.selectedWeapon = "BW01";
         this.selectedItem = null;
-        this.baseMesh = null;    // For tank1_base
-        this.turretMesh = null;  // For tank1_turret
+        
+        this.baseMesh = null;
+        this.turretMesh = null;
+        
+        this.physicsBaseMesh = null;
+        this.physicsTurretMesh = null;
+        this.baseBody = null;
+        this.turretBody = null;
+        this.physicsGroup = new THREE.Group();
+        this.game.scene.add(this.physicsGroup);
+        this.physicsGroup.visible = false;
+        this.disposalTimeout = null;
+        
         this.currentPosition = new THREE.Vector3(x, y, z);
         this.targetPosition = new THREE.Vector3(x, y, z);
-        this.positionLerpSpeed = 50; // Units per second
+        this.positionLerpSpeed = 1;
         this.loader = new GLTFLoader();
         this.turretYawGroup = new THREE.Group();
         this.turretPitchGroup = new THREE.Group();
-        this.turretYawGroup.position.set(0, 16.0, 0);
+        this.turretYawGroup.position.set(0, 2, 0);
         this.tankGroup.add(this.turretYawGroup);
         this.turretYawGroup.add(this.turretPitchGroup);
+        
         this.loadBaseModel();
         this.loadTurretModel();
-        this.createNameTag();
+        
+        this.fontLoader = new FontLoader();
+        this.font = null;
+        this.loadFont();
 
-        // --- Added Properties for Smooth Turret Movement ---
-        // Current and target angles (in degrees)
         this.turretYawCurrent = 0;
         this.turretYawTarget = 0;
         this.turretPitchCurrent = 0;
         this.turretPitchTarget = 0;
-
-        // Control how quickly the turret rotates (degrees/sec).
-        // Adjust this value to make turret rotate faster or slower.
         this.turretLerpSpeed = 90; 
+        
+        this.ui = new TankUI(this);
+    }
+
+    loadFont() {
+        this.fontLoader.load(
+            '/fonts/gentilis_bold.typeface.json',
+            (font) => {
+                this.font = font;
+                this.ui.createNameTag();
+                this.ui.createStatusLabels();
+            },
+            undefined,
+            (error) => {
+                console.error('Error loading font:', error);
+            }
+        );
     }
 
     getInventoryByType(type) {
         const result = [];
-        
         for (const [code, invItem] of Object.entries(this.inventory)) {
             const item = invItem.item;
             if (type === 'weapon' && item.category === 'Weapon') {
@@ -81,22 +110,17 @@ export class Tank {
                 });
             }
         }
-        
         return result;
     }
 
+    setSelectedWeapon(weaponCode) {
+        this.selectedWeapon = weaponCode;
+    }
 
-  // Update the weapon selection and notify the game
-  setSelectedWeapon(weaponCode) {
-    this.selectedWeapon = weaponCode;
-  }
-
-    // Similarly, add an item selection method
     setSelectedItem(itemCode) {
         this.selectedItem = itemCode;
     }
 
-    // Optionally, update your getter(s) if needed:
     getSelectedWeapon() {
         return this.selectedWeapon;
     }
@@ -105,7 +129,6 @@ export class Tank {
         return this.selectedItem;
     }
 
-
     applyColor(object3D, hexColor) {
         if (!object3D) return;
         object3D.traverse((child) => {
@@ -113,19 +136,14 @@ export class Tank {
                 child.castShadow = true;
                 child.receiveShadow = true;
                 if (child.material) {
-                    // Handle single or multiple materials
                     const materials = Array.isArray(child.material) ? child.material : [child.material];
                     materials.forEach(material => {
                         material.shadowSide = THREE.FrontSide;
-                        if (material.color) {
-                        }
                     });
                 }
             }
         });
-        if (this.nameTag) {
-            this.updateNameTagTexture();
-        }
+        this.ui.updateNameTagColor(hexColor);
     }
     
     getName() {
@@ -136,14 +154,21 @@ export class Tank {
         this.loader.load(
             '/models/tank1_base.glb',
             (gltf) => {
-                this.baseMesh = gltf.scene;
-                this.baseMesh.scale.set(2, 2, 2);
+                this.baseMesh = gltf.scene.clone();
                 if (this.color !== null) {
                     this.applyColor(this.baseMesh, this.color);
                 }
                 this.baseMesh.castShadow = true;
                 this.baseMesh.receiveShadow = true;
                 this.tankGroup.add(this.baseMesh);
+                
+                this.physicsBaseMesh = gltf.scene.clone();
+                if (this.color !== null) {
+                    this.applyColor(this.physicsBaseMesh, this.color);
+                }
+                this.physicsBaseMesh.castShadow = true;
+                this.physicsBaseMesh.receiveShadow = true;
+                this.physicsGroup.add(this.physicsBaseMesh);
             },
             undefined,
             (error) => {
@@ -156,15 +181,23 @@ export class Tank {
         this.loader.load(
             '/models/tank1_turret.glb',
             (gltf) => {
-                this.turretMesh = gltf.scene;
-                this.turretMesh.scale.set(2, 2, 2);
-                this.turretMesh.position.set(0, 0, 0);
+                this.turretMesh = gltf.scene.clone();
+                this.turretMesh.position.set(0, -1.5, 0);
                 if (this.color !== null) {
                     this.applyColor(this.turretMesh, this.color);
                 }                
                 this.turretMesh.castShadow = true;
                 this.turretMesh.receiveShadow = true;
                 this.turretPitchGroup.add(this.turretMesh);
+                
+                this.physicsTurretMesh = gltf.scene.clone();
+                this.physicsTurretMesh.position.set(0, 0, 0);
+                if (this.color !== null) {
+                    this.applyColor(this.physicsTurretMesh, this.color);
+                }
+                this.physicsTurretMesh.castShadow = true;
+                this.physicsTurretMesh.receiveShadow = true;
+                this.physicsGroup.add(this.physicsTurretMesh);
             },
             undefined,
             (error) => {
@@ -173,148 +206,67 @@ export class Tank {
         );
     }
 
-    createNameTag() {
-        const texture = this.makeTextTexture(this.name);
-        const spriteMaterial = new THREE.SpriteMaterial({
-            map: texture,
-            transparent: true,
-            depthTest: false,
-        });
-
-        this.nameTag = new THREE.Sprite(spriteMaterial);
-        this.nameTag.position.set(0, 40, 0);
-
-        // Create health bar
-        const healthTexture = this.makeHealthBarTexture(this.health);
-        const healthBarMaterial = new THREE.SpriteMaterial({
-            map: healthTexture,
-            transparent: true,
-            depthTest: false,
-        });
-
-        this.healthBar = new THREE.Sprite(healthBarMaterial);
-        this.healthBar.position.set(0, 45, 0);
-        this.healthBar.scale.set(50, 3, 1);
-        this.tankGroup.add(this.nameTag);
-        this.tankGroup.add(this.healthBar);
-    }
-
-    bigNameTag() {
-        BASE_SCALE.x = 120;
-        BASE_SCALE.y = 40;
-        BASE_SCALE.z = 15;
-        ANIMATION_SPEED = 6;
-        SCALE_FACTOR = 0.8;
-    }
-
-    littleNameTag() {
-        BASE_SCALE.x = 80;
-        BASE_SCALE.y = 20;
-        BASE_SCALE.z = 2;
-        ANIMATION_SPEED = 7;
-        SCALE_FACTOR = 0.05;
-    }
-
-    makeTextTexture(text) {
-        const canvas = document.createElement('canvas');
-        const context = canvas.getContext('2d');
-        canvas.width = 512;
-        canvas.height = 128;
-
-        context.clearRect(0, 0, canvas.width, canvas.height);
-        context.fillStyle = this.color ? '#' + this.color.toString(16).padStart(6, '0') : '#ffff00';        
-        context.font = '40px sans-serif';
-        context.textAlign = 'center';
-        context.textBaseline = 'middle';
-        context.fillText(text, canvas.width / 2, canvas.height / 2);
-
-        const texture = new THREE.Texture(canvas);
-        texture.needsUpdate = true;
-        return texture;
-    }
-
-    makeHealthBarTexture(health) {
-        const canvas = document.createElement('canvas');
-        const context = canvas.getContext('2d');
-        canvas.width = 256;
-        canvas.height = 2;
-
-        // Clear the canvas
-        context.clearRect(0, 0, canvas.width, canvas.height);
-
-        // Draw the background (gray)
-        context.fillStyle = '#444444';
-        context.fillRect(0, 0, canvas.width, canvas.height);
-
-        // Calculate health percentage
-        const healthPercent = health / 100;
-        const barWidth = canvas.width * healthPercent;
-
-        // Draw the health bar
-        context.fillStyle = this.getHealthColor(healthPercent);
-        context.fillRect(0, 0, barWidth, canvas.height);
-        const texture = new THREE.Texture(canvas);
-        texture.needsUpdate = true;
-        return texture;
-    }
-
-    getHealthColor(healthPercent) {
-        // Convert health percent to value between 0 and 1
-        healthPercent = Math.max(0, Math.min(1, healthPercent));
+    createPhysicsBodies() {
+        if (!this.game.physicsManager.initialized) return false;
         
-        let color;
-        
-        if (healthPercent > 0.6) {
-            // Blend between green and yellow
-            const t = (healthPercent - 0.6) / 0.4; // normalize to 0-1 range
-            const r = Math.round(255 * (1 - t));
-            const g = 255;
-            const b = 0;
-            color = `rgb(${r}, ${g}, ${b})`;
-        } else if (healthPercent > 0.2) {
-            // Blend between yellow and red
-            const t = (healthPercent - 0.2) / 0.4; // normalize to 0-1 range
-            const r = 255;
-            const g = Math.round(255 * t);
-            const b = 0;
-            color = `rgb(${r}, ${g}, ${b})`;
-        } else {
-            // Red for 20% or lower
-            color = '#ff0000';
+        if (this.baseBody || this.turretBody) {
+            this.removePhysicsBodies();
         }
         
-        return color;
+        const baseSize = new THREE.Vector3(1, 2, 2);
+        this.baseBody = this.game.physicsManager.createBoxBody(
+            this.physicsBaseMesh,
+            10,
+            baseSize,
+            {
+                friction: 0.7,
+                restitution: 0.2,
+                linearDamping: 0.05,
+                angularDamping: 0.05
+            }
+        );
+        
+        const turretSize = new THREE.Vector3(0.5, 0.5, 0.5);
+        this.turretBody = this.game.physicsManager.createBoxBody(
+            this.physicsTurretMesh,
+            5,
+            turretSize,
+            {
+                friction: 0.7,
+                restitution: 0.2,
+                linearDamping: 0.05,
+                angularDamping: 0.05
+            }
+        );
+        
+        return true;
+    }
+    
+    removePhysicsBodies() {
+        if (this.baseBody) {
+            this.game.physicsManager.removeRigidBody(this.baseBody);
+            this.baseBody = null;
+        }
+        
+        if (this.turretBody) {
+            this.game.physicsManager.removeRigidBody(this.turretBody);
+            this.turretBody = null;
+        }
     }
 
-    updateNameTagTexture() {
-        if (!this.nameTag) return;
-        const newTexture = this.makeTextTexture(this.name);
-        this.nameTag.material.map = newTexture;
-        this.nameTag.material.map.needsUpdate = true;
-    }
-
-    /**
-     * Update the tank's shield value.
-     * @param {number} newShield - The new shield value.
-     */
     setShield(newShield) {
         this.shield = newShield;
-        // Optionally, trigger any UI updates for the shield value here.
+        this.ui.updateStatusLabelVisibility();
     }
     
-    /**
-     * Update the tank's armor value.
-     * @param {number} newArmor - The new armor value.
-     */
     setArmor(newArmor) {
         this.armor = newArmor;
-        // Optionally, trigger any UI updates for the armor value here.
+        this.ui.updateStatusLabelVisibility();
     }
     
-
     setName(newName) {
         this.name = newName;
-        this.updateNameTagTexture();
+        this.ui.createNameTag();
     }
 
     setColor(hexColor) {
@@ -325,14 +277,23 @@ export class Tank {
         if (this.turretMesh) {
             this.applyColor(this.turretMesh, hexColor);
         }
+        if (this.physicsBaseMesh) {
+            this.applyColor(this.physicsBaseMesh, hexColor);
+        }
+        if (this.physicsTurretMesh) {
+            this.applyColor(this.physicsTurretMesh, hexColor);
+        }
+        this.ui.updateNameTagColor(hexColor);
     }
 
     setCash(newCash) {
         this.cash = newCash;
     }
+
     getCash() {
         return this.cash;
     }
+
     getColor() {
         return this.color;
     }
@@ -355,23 +316,17 @@ export class Tank {
 
     setHealth(value) {
         this.health = value;
-        // Update health bar if it exists
-        if (this.healthBar) {
-            const newTexture = this.makeHealthBarTexture(this.health);
-            this.healthBar.material.map = newTexture;
-            this.healthBar.material.map.needsUpdate = true;
-        }
     }
 
     setPosition(positionOrX, y, z) {
         if (y === undefined && z === undefined) {
-            // Handle case where a position object is passed
             this.tankGroup.position.set(positionOrX.x, positionOrX.y, positionOrX.z);
             this.targetPosition.set(positionOrX.x, positionOrX.y, positionOrX.z);
+            this.physicsGroup.position.set(positionOrX.x, positionOrX.y, positionOrX.z);
         } else {
-            // Handle case where individual coordinates are passed
             this.tankGroup.position.set(positionOrX, y, z);
             this.targetPosition.set(positionOrX, y, z);
+            this.physicsGroup.position.set(positionOrX, y, z);
         }
     }
     
@@ -411,58 +366,70 @@ export class Tank {
     }
 
     destroy() {
-        this.isAlive = false;
-        this.tankGroup.visible = false; 
+        this.explodeTank();
+        this.ui.toggleTank3dElementsVisibility(false);
     }
 
     resetForNewRound() {
         this.isAlive = true;
-        this.tankGroup.visible = true;
-        
-        // Recreate name tag and health bar
-        if (!this.nameTag || !this.healthBar) {
-            this.createNameTag(); // This method creates both nameTag and healthBar
-        } else {
-            this.nameTag.visible = true;
-            this.healthBar.visible = true;
-        }
-        
-        this.setHealth(100);
+        this.health = 100;
         this.armor = 0;
         this.shield = 0;
-        this.power = 200;
+        this.power = 20;
+        
+        this.removePhysicsBodies();
+        
+        if (this.physicsBaseMesh.parent === this.game.scene) {
+            this.game.scene.remove(this.physicsBaseMesh);
+        }
+        
+        if (this.physicsTurretMesh.parent === this.game.scene) {
+            this.game.scene.remove(this.physicsTurretMesh);
+        }
+        
+        if (this.physicsGroup.parent !== this.game.scene) {
+            this.game.scene.add(this.physicsGroup);
+        }
+        
+        this.physicsGroup.add(this.physicsBaseMesh);
+        this.physicsGroup.add(this.physicsTurretMesh);
+        this.physicsBaseMesh.position.set(0, 0, 0);
+        this.physicsTurretMesh.position.set(0, 0, 0);
+        this.physicsGroup.visible = false;
+        
+        this.tankGroup.visible = true;
+        
+        this.turretYawCurrent = 0;
+        this.turretYawTarget = 0;
+        this.turretPitchCurrent = 0;
+        this.turretPitchTarget = 0;
+        this.turretYawGroup.rotation.y = 0;
+        this.turretPitchGroup.rotation.x = 0;
+        
+        this.tankGroup.position.copy(this.targetPosition);
+        
+        this.ui.resetForNewRound();
+        this.ui.toggleTank3dElementsVisibility(true);
     }
 
     get mesh() {
         return this.tankGroup;
     }
 
-    updateNameTagScale(deltaTime) {
-        // Update the elapsed time
-        this.elapsedTime += deltaTime;
-        const scaleModifier = 1 + (Math.sin(this.elapsedTime * ANIMATION_SPEED) + 1) / 2 * SCALE_FACTOR;
-        
-        // Apply the scale
-        this.nameTag.scale.set(
-            BASE_SCALE.x * scaleModifier,
-            BASE_SCALE.y * scaleModifier,
-            BASE_SCALE.z * scaleModifier
-        );
-    }
-
-    
-
     update(deltaTime, camera) {
         if (!this.isAlive) return;
+        
         this.lerpPosition(deltaTime);
+        
         const yawDiff = getShortestAngleDiff(this.turretYawCurrent, this.turretYawTarget);
         const yawStep = this.turretLerpSpeed * deltaTime;
         if (Math.abs(yawDiff) > yawStep) {
             this.turretYawCurrent += Math.sign(yawDiff) * yawStep;
-          } else {
+        } else {
             this.turretYawCurrent = this.turretYawTarget;
-          }
+        }
         this.turretYawGroup.rotation.y = THREE.MathUtils.degToRad(this.turretYawCurrent);
+        
         let pitchDiff = this.turretPitchTarget - this.turretPitchCurrent;
         const pitchStep = this.turretLerpSpeed * deltaTime;
         if (Math.abs(pitchDiff) > pitchStep) {
@@ -471,24 +438,106 @@ export class Tank {
             this.turretPitchCurrent = this.turretPitchTarget;
         }
         this.turretPitchGroup.rotation.x = THREE.MathUtils.degToRad(this.turretPitchCurrent);
-        if (camera) {
-            if (this.nameTag) {
-                this.updateNameTagScale(deltaTime);
-            }
+        
+        this.ui.updateVisualValues(deltaTime);
+        this.ui.updateUIForCamera(camera);
+    }
+
+    explodeTank(disposalTime = 10, explosionOptions = {}) {
+        this.isAlive = false;
+        
+        this.tankGroup.visible = false;
+        
+        const tankWorldPos = new THREE.Vector3();
+        this.tankGroup.getWorldPosition(tankWorldPos);
+        
+        const baseWorldPos = new THREE.Vector3();
+        const baseWorldQuat = new THREE.Quaternion();
+        const turretWorldPos = new THREE.Vector3();
+        const turretWorldQuat = new THREE.Quaternion();
+        
+        this.baseMesh.getWorldPosition(baseWorldPos);
+        this.baseMesh.getWorldQuaternion(baseWorldQuat);
+        this.turretMesh.getWorldPosition(turretWorldPos);
+        this.turretMesh.getWorldQuaternion(turretWorldQuat);
+        
+        this.physicsGroup.position.set(0, 0, 0);
+        this.game.scene.remove(this.physicsGroup);
+        this.game.scene.add(this.physicsBaseMesh);
+        this.game.scene.add(this.physicsTurretMesh);
+        
+        this.physicsBaseMesh.position.copy(baseWorldPos);
+        this.physicsBaseMesh.position.y += 0.5;
+        this.physicsBaseMesh.quaternion.copy(baseWorldQuat);
+        
+        this.physicsTurretMesh.position.copy(turretWorldPos);
+        this.physicsTurretMesh.position.y += 0.5;
+        this.physicsTurretMesh.quaternion.copy(turretWorldQuat);
+        
+        this.physicsBaseMesh.visible = true;
+        this.physicsTurretMesh.visible = true;
+        
+        this.createPhysicsBodies();
+
+        if (this.turretBody) {
+            const turretImpulse = new THREE.Vector3(
+                (Math.random() * 2 - 1) * (explosionOptions.randomForce || 50) * 1.2,
+                (explosionOptions.upwardForce || 25) * 1.5,
+                (Math.random() * 2 - 1) * (explosionOptions.randomForce || 50) * 1.2
+            );
+            this.game.physicsManager.applyImpulse(this.turretBody, turretImpulse);
+            
+            const turretTorque = new THREE.Vector3(
+                (Math.random() * 2 - 1) * (explosionOptions.torqueForce || 10) * 1.5,
+                (Math.random() * 2 - 1) * (explosionOptions.torqueForce || 50) * 1.5,
+                (Math.random() * 2 - 1) * (explosionOptions.torqueForce || 10) * 1.5
+            );
+            this.game.physicsManager.applyTorque(this.turretBody, turretTorque);
         }
+
+        
+        if (this.baseBody) {
+            const baseImpulse = new THREE.Vector3(
+                (Math.random() * 2 - 1) * (explosionOptions.randomForce || 50),
+                (explosionOptions.upwardForce || 325),
+                (Math.random() * 2 - 1) * (explosionOptions.randomForce || 50)
+            );
+            this.game.physicsManager.applyImpulse(this.baseBody, baseImpulse);
+            
+            const baseTorque = new THREE.Vector3(
+                (Math.random() * 2 - 1) * (explosionOptions.torqueForce || 20),
+                (Math.random() * 2 - 1) * (explosionOptions.torqueForce || 50),
+                (Math.random() * 2 - 1) * (explosionOptions.torqueForce || 20)
+            );
+            this.game.physicsManager.applyTorque(this.baseBody, baseTorque);
+        }
+        
+        
+        if (this.disposalTimeout) {
+            clearTimeout(this.disposalTimeout);
+        }
+        
+        this.disposalTimeout = setTimeout(() => {
+            this.removePhysicsBodies();
+            
+            if (this.physicsBaseMesh.parent === this.game.scene) {
+                this.game.scene.remove(this.physicsBaseMesh);
+            }
+            
+            if (this.physicsTurretMesh.parent === this.game.scene) {
+                this.game.scene.remove(this.physicsTurretMesh);
+            }
+            
+            if (this.physicsGroup.parent !== this.game.scene) {
+                this.game.scene.add(this.physicsGroup);
+            }
+            
+            this.physicsGroup.add(this.physicsBaseMesh);
+            this.physicsGroup.add(this.physicsTurretMesh);
+            this.physicsBaseMesh.visible = false;
+            this.physicsTurretMesh.visible = false;
+        }, disposalTime * 1000);
+        
+        return true;
     }
 }
-
-function getShortestAngleDiff(current, target) {
-    let diff = (target - current) % 360;
-    // Force into [0, 360) range
-    if (diff < 0) {
-      diff += 360;
-    }
-    // Now force into [-180, 180] range
-    if (diff > 180) {
-      diff -= 360;
-    }
-    return diff;
-  }
-  

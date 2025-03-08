@@ -51,16 +51,11 @@ export default class PlayerManager {
     this.isAdvancingTurn = false;
 
     this.currentPlayerHasFired = false;
-    this.SPAWN_RADIUS = 125;
+    this.SPAWN_RADIUS = 35;
 
     // Track available colors for this game instance
     this.availableColors = [...AVAILABLE_COLORS];
 
-    /**
-     * Timestamp when the current turn started (in milliseconds)
-     * @type {number|null}
-     */
-    this.turnStartTime = null;
   }
 
   /**
@@ -238,11 +233,17 @@ resetPlayersForNextRound() {
   removePlayerPermanently(userId) {
     if (this.players[userId]) {
       const player = this.players[userId];
+      const gonePlayer = this.getPlayer(userId);
+      this.io.to(this.gameId).emit('playerLeft', {
+        id: userId,
+        state: gonePlayer.getState()
+      });
       this.returnColor(player.getColor());
       this.spawnManager.returnPreGameSpawn(userId);
       delete this.players[userId];
       this.turnManager.removePlayer(userId);
       this.io.to(this.gameId).emit('playerListUpdated', this.getAllPlayers());
+
     }
   }
 

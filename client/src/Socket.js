@@ -79,7 +79,6 @@ const setupSocketEvents = () => {
     setupCombatEvents();
     setupTerrainEvents();
     setupShopEvents();
-    setupHelicopterEvents();
 
 };
 
@@ -170,20 +169,6 @@ const setupTerrainEvents = () => {
 const setupShopEvents = () => {
     socket.on('purchaseSuccess', (data) => {
         console.log('Purchase successful:', data);
-    });
-};
-
-const setupHelicopterEvents = () => {
-    socket.on('spawnExistingHelicopters', (helicopterStates) => {
-        game.spawnExistingHelicopters(helicopterStates);
-    });
-        
-    socket.on('helicopterDamaged', (data) => {
-        game.handleHelicopterDamage(data);
-    });
-    
-    socket.on('helicopterDestroyed', (data) => {
-        game.removeHelicopter(data.helicopterId);
     });
 };
 

@@ -8,8 +8,6 @@ export default class BasicWeapon {
     this.weaponCode = 'BW01';
     this.id = uuidv4();
 
-    // Register optional custom logic for on-impact 
-    // (If needed for special behaviors)
     projectileManager.registerWeaponHandler(this.id, (impactEvent, timeline, manager) => {
       // do nothing special for BasicWeapon
     });
@@ -27,7 +25,7 @@ export default class BasicWeapon {
       isFinalProjectile: true,
       baseDamage: 20,
       craterSize: 30,
-      timeFactor: 0.7,
+      timeFactor: 0.9,
       // etc
     }];
   

@@ -23,7 +23,7 @@ const PlayerList = () => {
   const [players, setPlayers] = useState([]);
   const [turnInfo, setTurnInfo] = useState({
     currentPlayerId: null,
-    turnDuration: 0,
+    turnTimeRemaining: 0,
     turnStartServer: 0,
   });
   const [timeLeft, setTimeLeft] = useState(0);
@@ -42,6 +42,7 @@ const PlayerList = () => {
     // Handle player list updates
     const handlePlayerListUpdated = (data) => {
       setPlayers(data);
+
     };
 
     // Subscribe to player manager's current player changed event
@@ -59,38 +60,15 @@ const PlayerList = () => {
 
     // Handle turn updates from socket
     const handleTurnUpdate = (data) => {
-      const { currentPlayerId, turnDuration, turnStart } = data;
+      const { currentPlayerId, turnTimeRemaining, turnStartTime } = data;
       setCurrentTurnPlayerId(currentPlayerId);
       setTurnInfo({
         currentPlayerId,
-        turnDuration,
-        turnStartServer: turnStart,
+        turnTimeRemaining,
+        turnStartServer: turnStartTime,
       });
-      // Set initial timeLeft based on server-provided turn start
-      const elapsed = Date.now() - turnStart;
-      setTimeLeft(turnDuration - elapsed > 0 ? turnDuration - elapsed : 0);
+      setTimeLeft(turnTimeRemaining);
     };
-
-    // Initialize with current state if available
-    if (game.playerManager && game.playerManager.currentPlayerId !== undefined) {
-      setCurrentTurnPlayerId(game.playerManager.currentPlayerId);
-      setTurnInfo(prev => ({
-        ...prev,
-        currentPlayerId: game.playerManager.currentPlayerId
-      }));
-    }
-
-    // If the game already has turn information (for mid-game joiners)
-    if (game.turnTimeRemaining !== undefined) {
-      console.log(game.turnTimeRemaining);
-      // Use the turn duration from gameData and the pre-calculated turn start time
-      setTimeLeft(game.turnTimeRemaining);
-      setTurnInfo(prev => ({
-        ...prev,
-        turnDuration: game.turnDuration,
-        turnStartServer: game.turnStartTime // Assumes this was set in game.init()
-      }));
-    }
 
     // Set up event listeners
     game.socket.on('playerListUpdated', handlePlayerListUpdated);
@@ -119,29 +97,37 @@ const PlayerList = () => {
     };
   }, [game]);
 
-  // Update timer using the actual turn start time from the server
-  useEffect(() => {
+// Update timer using the time remaining from the server
+useEffect(() => {
+  if (intervalRef.current) {
+    clearInterval(intervalRef.current);
+  }
+  
+  // If no time remaining or no active turn, don't start timer
+  if (!turnInfo.turnTimeRemaining || turnInfo.turnTimeRemaining <= 0) {
+    setTimeLeft(0);
+    return;
+  }
+
+  // Set initial time from server
+  setTimeLeft(turnInfo.turnTimeRemaining);
+  
+  // Simple countdown timer that decrements every 100ms
+  intervalRef.current = setInterval(() => {
+    setTimeLeft((prevTime) => {
+      const newTime = prevTime - 100;
+      return newTime > 0 ? newTime : 0;
+    });
+  }, 100);
+
+  return () => {
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
     }
-    
-    if (!turnInfo.turnStartServer || turnInfo.turnDuration <= 0) {
-      setTimeLeft(0);
-      return;
-    }
+  };
+}, [turnInfo.turnTimeRemaining]);
 
-    intervalRef.current = setInterval(() => {
-      const elapsed = Date.now() - turnInfo.turnStartServer;
-      const remaining = turnInfo.turnDuration - elapsed;
-      setTimeLeft(remaining > 0 ? remaining : 0);
-    }, 100);
 
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-    };
-  }, [turnInfo]);
 
   const renderStatusBar = (label, value, color) => (
     <div className="status-bar-container">

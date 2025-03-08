@@ -108,7 +108,7 @@ export class BouncingRabbitWeapon {
     const isFinalSplit = nextSplitCount >= this.maxTotalProjectiles;
 
     // We'll default to 250 if no power is found in the event
-    const parentPower = impactEvent.power || 250;
+    const parentPower = impactEvent.power || 25;
     
     // Check if we have normal data, if not use default values
     const hasNormalData = impactEvent.surfaceNormal && impactEvent.incomingDirection;
@@ -219,7 +219,7 @@ export class BouncingRabbitWeapon {
     return {
       startPos: new THREE.Vector3(
         position.x,
-        position.y + 2.0, // Start slightly higher to prevent immediate re-collision
+        position.y + 0.1, // Start slightly higher to prevent immediate re-collision
         position.z
       ),
       timeFactor: 0.8,

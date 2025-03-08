@@ -2,25 +2,23 @@
 import { Clock } from 'three';
 import { EventEmitter } from './EventEmitter';
 import * as THREE from 'three';
-import { ClientProjectile } from './Projectile.js';
-import { GameInput } from './GameInput.js';
+import { InputManager } from './InputManager.js';
 import { CameraManager } from './CameraManager.js';
 import { TerrainRenderer } from './TerrainRenderer.js';
 import { SceneManager } from './SceneManager.js';
 import { ShopManager } from './stores/shopStore.js';
 import { PlayerManager } from './PlayerManager.js';
 import { DamageNumberManager } from './DamageNumberManager.js';
-import { GPUParticleManager } from './GpuParticleManager.js';
 import { FoliageManager } from './FoliageManager.js';
 import { ShieldManager } from './ShieldManager.js';
-import { HelicopterManager } from './HelicopterManager.js';
+import { HelicopterController } from './HelicopterController.js';
 import { PingManager } from './PingManager.js';
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { DroneFeedShader } from './shaders/DroneFeedShader.js';
 import { notificationManager } from './NotificationManager';
 import { ProjectileTimelineManager } from './ProjectileTimelineManager.js';
+import { PhysicsManager } from './PhysicsManager.js';
+import { CurrentPlayerArrow } from './CurrentPlayerArrow.js';
 
 class FPSDisplay {
     constructor() {
@@ -64,13 +62,13 @@ export class Game extends EventEmitter {
         this.socket = socket;
         this.projectiles = [];
         this.projectileMap = new Map();
+        this.playerManager = new PlayerManager(this);
         this.setupGameState();
-        this.setupManagers();
+
     }
 
     setupGameState() {
         this.lastUpdateTime = performance.now();
-        this.currentPlayerHasFired = false;
         this.turnTimeRemaining = 0;
         this.clock = new Clock();
         this.currentRound = 0;
@@ -79,93 +77,118 @@ export class Game extends EventEmitter {
         this.sunRotationRPM = 0;
         this.isDroneView = false;
         this.state = 'pregame';
+        if (this.cameraManager) {
+            this.cameraManager.spectatorMode = 'auto';
+        }
+        if (this.scene && !this.currentPlayerArrow) {
+            this.currentPlayerArrow = new CurrentPlayerArrow(this.scene);
+        }
     }
 
-    setupManagers() {
-        this.sceneManager = new SceneManager(this);
-        this.shopManager = new ShopManager(this.socket, 5000);
-        this.playerManager = new PlayerManager(this);
-    }
-
+// Update the setupManagers method in the Game class
+setupManagers() {
+    // Initialize physics
+    this.physicsManager = new PhysicsManager(this);
+    this.physicsManager.init().then(success => {
+        if (success) {
+            console.log('Physics system initialized');
+        } else {
+            console.error('Failed to initialize physics system');
+        }
+    });
+}
     init(gameData) {
+        this.sceneManager = new SceneManager(this);
+
         if (gameData.terrain) this.currentTheme = gameData.terrain.theme;
         const { scene, renderer } = this.sceneManager.setupScene();
         this.scene = scene;
         this.renderer = renderer;
-        this.composer = new EffectComposer(renderer);
+        this.currentPlayerArrow = new CurrentPlayerArrow(this.scene);
         this.foliageManager = new FoliageManager(this.sceneManager, this.scene);
-        this.gpuParticleManager = new GPUParticleManager(this.renderer, this.scene);
         this.initializeGame(gameData);
         this.shieldManager = new ShieldManager(this.scene);
         this.setupEventListeners();
+
+        this.setupManagers();
+        
+        // Set up drone view shader pass
+        this.dronePass = new ShaderPass(DroneFeedShader);
+        this.dronePass.material.uniforms.resolution.value.set(window.innerWidth, window.innerHeight);
+        
+        // Setup post-processing with the camera
+        const composers = this.sceneManager.setupPostProcessing(this.cameraManager.camera);
+        this.finalComposer = composers.finalComposer;
+        this.bloomComposer = composers.bloomComposer;
+        
         this.fpsDisplay = new FPSDisplay();
         this.animate();
     }
 
     initializeGame(gameData) {
         this.terrainRenderer = new TerrainRenderer(this.scene, this.sceneManager.directionalLight, this.renderer);
-        if (gameData.terrain) this.terrainRenderer.createTerrain(gameData.terrain);
         this.cameraManager = new CameraManager(this, this.terrainRenderer);
-        this.dmgManager = new DamageNumberManager(this.scene, this.cameraManager, './particles/damage_numbers.png');
-        if (gameData.terrain) this.cameraManager.setView('thirdPerson');
-        this.playerManager.init(gameData);
-        this.inputManager = new GameInput(this, this.socket);
-        this.helicopterManager = new HelicopterManager(
-            this.scene,
-            this.sceneManager.loader,
-            this.terrainRenderer,
-            this.gpuParticleManager,
-            this.dmgManager,
-            this
-        );
-        this.timelineManager = new ProjectileTimelineManager(this, this.helicopterManager);
-
-        this.sceneManager.loadEXR(this.scene, this.renderer, './hdri/hut.exr');
-        this.sceneManager.loadTableModel(this.scene);
-        if (gameData.turnTimeRemaining !== undefined) {
-            this.turnDuration = gameData.turnDuration || 45000;
-            const currentTime = performance.now();
-            this.turnStartTime = currentTime - (this.turnDuration - gameData.turnTimeRemaining);
-            this.turnTimeRemaining = gameData.turnTimeRemaining;
-
-            this.emit('turnUpdate', {
-                currentPlayerId: this.playerManager.currentPlayerId,
-                turnDuration: this.turnDuration,
-                turnStart: this.turnStartTime,
-            });
-        }
-
-        this.renderPass = new RenderPass(this.scene, this.cameraManager.camera);
-        this.composer.addPass(this.renderPass);
-        this.dronePass = new ShaderPass(DroneFeedShader);
-        this.dronePass.material.uniforms.resolution.value.set(window.innerWidth, window.innerHeight);
+        this.cameraManager.spectatorMode = 'auto';
+        this.dmgManager = new DamageNumberManager(this.scene, this.cameraManager);
+        this.inputManager = new InputManager(this, this.socket);
+        this.timelineManager = new ProjectileTimelineManager(this, this.helicopterController, this.terrainRenderer);
+        this.helicopterController = new HelicopterController(this.scene, this.socket, this);   
+        this.shopManager = new ShopManager(this.socket, 5000);
         
+        // Create terrain first if it exists
+        let terrainCreated = false;
+        if (gameData.terrain) {
+            this.terrainRenderer.createTerrain(gameData.terrain);
+            terrainCreated = true;
+        }
+        
+        this.playerManager.init(gameData);
+        this.sceneManager.loadTableModel();
+    
+        // Setup game state based on round information
         if (gameData.currentRound !== 0) { 
-            this.lightsUp();
             this.sceneManager.disposePlatformMesh();
             this.playerManager.setCurrentPlayerId(gameData.currentPlayerId);
+            this.turnTimeRemaining = gameData.turnTimeRemaining;
+            this.turnStartTime = gameData.turnStartTime;
             this.currentPlayerId = gameData.currentPlayerId;
             this.state = 'playing';
+            this.playerManager.handleGameStart();
             this.emit('stateChange', this.state);
-            const currentTank = this.playerManager.getCurrentPlayer();
-            this.cameraManager.setTarget(currentTank.mesh);
-            this.cameraManager.setView('thirdPerson');
-            if (typeof currentTank.turretYawCurrent === 'number') {
-                this.cameraManager.yaw = THREE.MathUtils.degToRad(currentTank.turretYawCurrent) + Math.PI;
+            
+            // Only set camera after terrain is valid
+            if (terrainCreated && this.terrainRenderer.mesh) {
+                const currentTank = this.playerManager.getCurrentPlayer();
+                this.cameraManager.setTarget(currentTank.mesh);
+                this.cameraManager.setView('thirdPerson');
+                if (typeof currentTank.turretYawCurrent === 'number') {
+                    this.cameraManager.yaw = THREE.MathUtils.degToRad(currentTank.turretYawCurrent) + Math.PI;
+                }
+            }
+        } else {
+            this.sceneManager.addPregamePlatform();
+            // Only set preGame camera view after confirming terrain status
+            if (gameData.terrain) {
+                // Only proceed if terrain is valid
+                if (this.terrainRenderer.mesh) {
+                    this.cameraManager.setView('preGame');
+                }
+            } else {
+                // No terrain needed for preGame view
+                this.cameraManager.setView('preGame');
             }
         }
-
+    
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-
+    
         const pingManager = new PingManager(this.socket);
         pingManager.start();
-        if (gameData.currentRound === 0) this.cameraManager.setView('preGame');
     }
 
+    
     // Called when the server sends a complete projectile timeline
     handleFullProjectileTimeline(timelineData) {
-        console.log(timelineData);
         this.timelineManager.queueTimeline(timelineData);
     }
 
@@ -180,44 +203,15 @@ export class Game extends EventEmitter {
     isGameOver() {
         return this.state === 'postgame';
     }
-
-    spawnExistingHelicopters(helicopterStates) {
-        // Expect each helicopter state to now include plannedPath and planStartTime.
-        helicopterStates.forEach((heliState) => {
-            this.spawnHelicopter({
-                id: heliState.id,
-                state: heliState,
-                plannedPath: heliState.plannedPath,
-                planStartTime: heliState.planStartTime
-            });
-            console.log(heliState.plannedPath);
-        });
-    }
-
-    spawnHelicopter(data) {
-        // data should include id, state, plannedPath, and planStartTime.
-        this.helicopterManager.spawnHelicopter(data);
-    }
-    
-    updateHelicopterPlan(data) {
-        // When the server sends updated plan data (including plannedPath and planStartTime).
-        this.helicopterManager.updateHelicopterPlan(data);
-    }
-    
-    handleHelicopterDamage(data) {
-        this.helicopterManager.handleHelicopterDamage(data);
-    }
-    
-    removeHelicopter(id) {
-        this.helicopterManager.removeHelicopter(id);
-    }
     
     doDroneView(){
-        this.composer.addPass(this.dronePass);
+        this.sceneManager.setupDroneView(this.dronePass);
+        this.isDroneView = true;
     }
 
     doNormalView(){
-        this.composer.removePass(this.dronePass);
+        this.sceneManager.removeDroneView(this.dronePass);
+        this.isDroneView = false;
     }
 
     addShieldToPlayer(playerId) {
@@ -231,48 +225,125 @@ export class Game extends EventEmitter {
     }
 
     spawnFoliage(spawnPoints) {
-        this.foliageManager.spawnFoliage(spawnPoints, this.currentTheme);
+        if (this.foliageManager) this.foliageManager.spawnFoliage(spawnPoints, this.currentTheme);
     }
 
-    lightsUp() {
-        this.sceneManager.directionalLight.intensity = 0.5;
-        this.sceneManager.ambientLight.intensity = 0.5;
-    }
+/**
+ * Smoothly transitions light intensity over the specified duration
+ * @param {number} duration - Transition duration in seconds
+ * @param {Object} targetValues - Object containing target light intensities
+ */
+lightsUp(duration = 3.0, targetValues = { directional: 3.4, ambient: 1.8 }) {
+    // Store the starting values
+    const startValues = {
+        directional: this.sceneManager.directionalLight.intensity,
+        ambient: this.sceneManager.ambientLight.intensity
+    };
+    
+    // Store the target values
+    const targets = {
+        directional: targetValues.directional,
+        ambient: targetValues.ambient
+    };
+    
+    // Calculate the increment per second
+    const increments = {
+        directional: (targets.directional - startValues.directional) / duration,
+        ambient: (targets.ambient - startValues.ambient) / duration
+    };
+    
+    // Track animation state
+    const animation = {
+        startTime: null,        // Will be set after delay
+        delayStartTime: performance.now(),
+        delayDuration: 500,  
+        duration: duration * 1000, // Convert to milliseconds
+        active: true,
+        delayComplete: false
+    };
+    
+    // Animation update function
+    const updateLights = (currentTime) => {
+        if (!animation.active) return;
+        
+        // Check if we're still in the delay period
+        if (!animation.delayComplete) {
+            const delayElapsed = currentTime - animation.delayStartTime;
+            
+            if (delayElapsed < animation.delayDuration) {
+                // Still in delay period, continue waiting
+                requestAnimationFrame(updateLights);
+                return;
+            } else {
+                // Delay just completed, set the actual animation start time
+                animation.delayComplete = true;
+                animation.startTime = currentTime;
+            }
+        }
+        
+        // Calculate elapsed time since animation started (after delay)
+        const elapsed = currentTime - animation.startTime;
+        
+        // Check if animation is complete
+        if (elapsed >= animation.duration) {
+            // Set final values
+            this.sceneManager.directionalLight.intensity = targets.directional;
+            this.sceneManager.ambientLight.intensity = targets.ambient;
+            animation.active = false;
+            return;
+        }
+        
+        // Calculate progress (0 to 1)
+        const progress = elapsed / animation.duration;
+        
+        // Update light intensities
+        this.sceneManager.directionalLight.intensity = 
+            startValues.directional + (increments.directional * progress * duration);
+        this.sceneManager.ambientLight.intensity = 
+            startValues.ambient + (increments.ambient * progress * duration);
+        
+        // Continue animation
+        requestAnimationFrame(updateLights);
+    };
+    
+    // Start the animation loop
+    requestAnimationFrame(updateLights);
+    
+    // Return a function to cancel the animation if needed
+    return () => {
+        animation.active = false;
+    };
+}
 
-    loadNewTerrain(terrain) {
-        console.log(terrain.theme);
-        this.terrainRenderer.dispose();
-        this.foliageManager.clearFoliage();
-        this.terrainRenderer.currentTheme = terrain.theme;
-        this.currentTheme = terrain.theme;
-        this.terrainRenderer.createTerrain(terrain);
-        this.sceneManager.disposePlatformMesh();
-        this.lightsUp();
-    }
+async loadNewTerrain(terrain) {
+    this.terrainRenderer.dispose();
+    this.foliageManager.clearFoliage();   
+    this.terrainRenderer.currentTheme = terrain.theme;
+    this.currentTheme = terrain.theme;
+    
+    // Wait for the terrain to be created
+    await this.terrainRenderer.createTerrain(terrain);
+    
+    this.sceneManager.disposePlatformMesh();
+    this.lightsUp();
 
+    if (this.physicsManager && this.physicsManager.initialized) {
+        this.physicsManager.createTerrainCollision();
+    }
+}
     setupEventListeners() {
-        window.addEventListener('resize', () => this.handleResize());
+        window.addEventListener('resize', () => {
+            if (this.renderer && this.cameraManager) {
+                this.sceneManager.handleResize();
+                this.cameraManager.camera.aspect = window.innerWidth / window.innerHeight;
+                this.cameraManager.camera.updateProjectionMatrix();
+                // Update drone pass resolution if in drone view
+                if (this.isDroneView && this.dronePass) {
+                    this.dronePass.material.uniforms.resolution.value.set(window.innerWidth, window.innerHeight);
+                }
+            }
+            });
         
-        // New helicopter events from the server:
-        this.socket.on('spawnHelicopter', data => {
-            // data includes id, state, plannedPath, and planStartTime
-            this.spawnHelicopter(data);
-        });
-
-          // Make sure you're listening for the path update events where you set up your socket handlers:
-        this.socket.on('helicopterPathUpdate', (data) => {
-            this.helicopterManager.updateHelicopterPath(data);
-        });
-
-        this.socket.on('helicopterDamage', data => {
-            this.handleHelicopterDamage(data);
-        });
-        this.socket.on('removeHelicopter', data => {
-            // data can be simply the helicopter id, or an object containing the id.
-            this.removeHelicopter(data.id || data);
-        });
-        
-        // Existing event listeners:
         this.socket.on('shieldAdded', data => {
             const player = this.playerManager.getPlayer(data.playerId);
             if (player) {
@@ -303,13 +374,6 @@ export class Game extends EventEmitter {
         });
     }
     
-    handleResize() {
-        if (this.renderer && this.cameraManager) {
-            this.renderer.setSize(window.innerWidth, window.innerHeight);
-            this.cameraManager.camera.aspect = window.innerWidth / window.innerHeight;
-            this.cameraManager.camera.updateProjectionMatrix();
-        }
-    }
 
     handleRoundStarting(currentRound, totalRounds) {
         notificationManager.showMessage(`Round ${currentRound} of ${totalRounds} starting!`, 5000);
@@ -328,9 +392,6 @@ export class Game extends EventEmitter {
         if (playerKilled) {
             playerKilled.destroy();
             notificationManager.showMessage(`${playerKilled.name} Destroyed!`, 5000);
-            if (data.id === this.playerManager.currentPlayerId) {
-                this.cameraManager.setView('overhead');
-            }
         }
     }
 
@@ -339,6 +400,8 @@ export class Game extends EventEmitter {
         notificationManager.showMessage('Game Starting in ' + (startDelay / 1000).toFixed(1) + ' seconds!', startDelay);
         this.state = 'pregame';
         this.emit('stateChange', this.state);
+        this.playerManager.handleGameStart();
+
     }
 
     handleTurnChangePending() {
@@ -349,23 +412,44 @@ export class Game extends EventEmitter {
         this.playerManager.setCurrentPlayerId(currentPlayerId);
         const currentTank = this.playerManager.getCurrentPlayer();
         if (!currentTank || !currentTank.mesh) return;
-        this.currentPlayerHasFired = false;
-        this.cameraManager.setTarget(currentTank.mesh);
-        this.cameraManager.setView('thirdPerson');
-        if (typeof currentTank.turretYawCurrent === 'number') {
-            this.cameraManager.yaw = THREE.MathUtils.degToRad(currentTank.turretYawCurrent) + Math.PI;
+        
+        // Update the arrow to point at the current player
+        if (this.currentPlayerArrow) {
+            this.currentPlayerArrow.setTarget(currentTank.mesh);
         }
+        
+        // Check if it's the local player's turn
+        const isLocalPlayerTurn = currentPlayerId === this.playerManager.playerId;
+        
+        if (isLocalPlayerTurn) {
+            // If it's our turn, always set to third person view
+            this.cameraManager.setTarget(currentTank.mesh);
+            this.cameraManager.setView('thirdPerson');
+            if (typeof currentTank.turretYawCurrent === 'number') {
+                this.cameraManager.yaw = THREE.MathUtils.degToRad(currentTank.turretYawCurrent) + Math.PI;
+            }
+        } else {
+            // If we're spectating, check the spectator mode
+            const spectatorMode = this.cameraManager.getSpectatorMode();
+            
+            if (spectatorMode === 'auto') {
+                // In auto mode, we follow the current player
+                this.cameraManager.setTarget(currentTank.mesh);
+                this.cameraManager.setView('thirdPerson');
+                if (typeof currentTank.turretYawCurrent === 'number') {
+                    this.cameraManager.yaw = THREE.MathUtils.degToRad(currentTank.turretYawCurrent) + Math.PI;
+                }
+            }
+            // In freeFly mode, we don't change anything and let the player control the camera
+        }
+        
         notificationManager.showMessage(`${currentTank.name}'s Turn!`, 3000);
         this.state = 'playing';
         this.emit('stateChange', this.state);
     }
 
-    handleProjectileFired(data) {
-        const projectile = new ClientProjectile(data, this.scene, this.gpuParticleManager, this.terrainRenderer);
-        this.projectiles.push(projectile); 
-        this.currentPlayerHasFired = true;
-    }
-    
+
+    // Update the handleTerrainPatch method to update physics
     handleTerrainPatch(patch) {
         if (this.terrainRenderer) {
             this.terrainRenderer.applyTerrainPatch(patch);
@@ -378,54 +462,44 @@ export class Game extends EventEmitter {
         const deltaTime = (currentTime - this.lastUpdateTime) / 1000;
         this.lastUpdateTime = currentTime;
         this.updateGameElements(deltaTime);
-        this.terrainRenderer.update();
-        this.composer.render();
+        this.sceneManager.sortTransparentObjects();
+        this.sceneManager.renderWithBloom(this.cameraManager.camera);
     }
 
     updateGameElements(deltaTime) {
         this.fpsDisplay.update();
-        this.cameraManager.update(deltaTime);
-        this.dmgManager.update(deltaTime);
-        this.shieldManager.update();
-        this.gpuParticleManager.update(deltaTime);
-        this.playerManager.updatePlayers(deltaTime, this.cameraManager.camera);
-        this.timelineManager.update(deltaTime);
-        for (const proj of this.projectiles) {
-            proj.updateVisual(deltaTime);
+        if (this.cameraManager) {
+            this.cameraManager.update(deltaTime);
         }
-        this.updateTerrainShaders();
-        this.updateSunPosition(deltaTime);
-        this.terrainRenderer.updateReflections(this.renderer, this.scene, this.cameraManager.camera);
-        // Update helicopters based on their pre-planned paths.
-        this.helicopterManager.update(deltaTime);
-    }
+        if (this.dmgManager) {
+            this.dmgManager.update(deltaTime);
+        }
+        if (this.shieldManager) {
+            this.shieldManager.update();
+        }
+        if (this.timelineManager) {
+            this.timelineManager.particleSystem.update(deltaTime);
+            this.timelineManager.update(deltaTime);
+        }
+        if (this.playerManager) {
+            this.playerManager.updatePlayers(deltaTime, this.cameraManager.camera);
+        }
+        if (this.helicopterController) {
+            this.helicopterController.update(this.lastUpdateTime, deltaTime);
+            this.helicopterController.updateRotors(deltaTime);
+        }
+        if (this.physicsManager && this.physicsManager.initialized) {
+            this.physicsManager.update(deltaTime);
+        }
+        if (this.currentPlayerArrow) {
+            this.currentPlayerArrow.update(deltaTime);
+        }
 
-    updateSunPosition(deltaTime) {
-        if (!this.sceneManager.directionalLight) return;
-        const rotationAngle = (this.sunRotationRPM * Math.PI * 2 * deltaTime) / 60;
-        this.sceneManager.directionalLight.position.applyAxisAngle(
-            new THREE.Vector3(1, 0, 1),
-            rotationAngle
-        );
-        this.sceneManager.directionalLight.lookAt(0, 0, 0);
-        if (this.sceneManager.directionalLight.shadow) {
-            this.sceneManager.directionalLight.shadow.camera.updateProjectionMatrix();
-        }
+        this.terrainRenderer.update();
+        this.terrainRenderer.updateReflections(this.renderer, this.scene, this.cameraManager.camera);
+        this.updateTerrainShaders();
     }
     
-    updateProjectiles(deltaTime) {
-        this.projectiles.forEach(proj => {
-            proj.update(deltaTime);
-            if (proj.mesh) {
-                const pos = proj.mesh.position;
-                if (Math.abs(pos.x) > 4000 || Math.abs(pos.y) > 4000 || Math.abs(pos.z) > 4000) {
-                    proj.destroy();
-                }
-            }
-        });
-        this.projectiles = this.projectiles.filter(p => !p.isDestroyed);
-    }
-
     updateTerrainShaders() {
         if (this.terrainRenderer.currentTheme === 'grassland' && 
             this.terrainRenderer.surfacePlane && 
@@ -433,8 +507,11 @@ export class Game extends EventEmitter {
             if (this.terrainRenderer.surfacePlane.material.uniforms.uTime) {
                 this.terrainRenderer.surfacePlane.material.uniforms.uTime.value = this.clock.getElapsedTime();
             }
-            this.dronePass.material.uniforms.time.value = this.clock.getElapsedTime() * 0.001;
-            if (this.terrainRenderer.material.uniforms.lightPosition &&
+            if (this.isDroneView && this.dronePass) {
+                this.dronePass.material.uniforms.time.value = this.clock.getElapsedTime() * 0.001;
+            }
+            if (this.terrainRenderer.material && this.terrainRenderer.material.uniforms && 
+                this.terrainRenderer.material.uniforms.lightPosition &&
                 this.sceneManager.directionalLight) {
                 this.terrainRenderer.material.uniforms.lightPosition.value.copy(
                     this.sceneManager.directionalLight.position

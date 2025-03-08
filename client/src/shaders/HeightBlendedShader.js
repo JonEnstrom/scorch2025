@@ -23,17 +23,17 @@ export const HeightBlendedShader = {
     thresholdHigh: { value: 20.0 },
     blendRange: { value: 2.0 },
     lightPosition: { value: new THREE.Vector3(0, 1000, 0) },
-    ambientColor: { value: new THREE.Color(0.35, 0.35, 0.35) },
-    diffuseColor: { value: new THREE.Color(0.9, 0.9, 0.9) },
+    ambientColor: { value: new THREE.Color(0.1, 0.1, 0.1) },
+    diffuseColor: { value: new THREE.Color(0.95, 0.95, 0.95) },
     specularColor: { value: new THREE.Color(0.1, 0.1, 0.1) },
-    shininess: { value: 5 },
-    normalScale: { value: 2 },
+    shininess: { value: 10 },
+    normalScale: { value: 2.5 },
     shadowMap: { value: null },                
     shadowMatrix: { value: new THREE.Matrix4() },  
-    shadowDarkness: { value: 0.70 },              
+    shadowDarkness: { value: 0.80 },              
     shadowBias: { value: 0.005 },            
     scorchPositions: { value: null },
-    terrainSize: { value: new THREE.Vector2(2400, 2400) },
+    terrainSize: { value: new THREE.Vector2(240, 240) },
 
     // **New Uniform for Scorch Texture**
     scorchTexture: { value: null }, 
@@ -50,7 +50,7 @@ uniform mat4 shadowMatrix;
 
 void main() {
     // Store the displaced height
-    vHeight = position.z;
+    vHeight = position.y;
 
     // Compute world position
     vec4 worldPosition = modelMatrix * vec4(position, 1.0);

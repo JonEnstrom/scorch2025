@@ -9,7 +9,7 @@ export class MountainMercWeapon {
 
     // Weapon configuration
     this.childCount = 7;
-    this.spreadAngle = 0.5;          // Radians for random spread
+    this.spreadAngle = 0.25;          // Radians for random spread
     this.upwardAngle = Math.PI / 6;  // Possibly not used, but included
     this.childPowerMultiplier = 0.9; // Children move slower than parent
 
@@ -35,7 +35,7 @@ export class MountainMercWeapon {
       explosionType: 'normal',
       explosionSize: 0.5,
       projectileScale: 3,
-      projectileStyle: 'missile',
+      projectileStyle: 'projectile_1',
       craterSize: 1,
       baseDamage: 40,
       timeFactor: 1.0 // Parent projectile uses normal speed
@@ -59,7 +59,7 @@ export class MountainMercWeapon {
     const childProjectiles = this.createChildProjectiles(
       impactEvent.position,
       impactEvent.playerId,
-      impactEvent.power || 200
+      impactEvent.power || 20
     );
 
     const spawnTime = impactEvent.time;
@@ -105,7 +105,7 @@ export class MountainMercWeapon {
         craterSize: 80,
         baseDamage: 50,
         preImpactBounces: 1,
-        preImpactBouncePower: 100,
+        preImpactBouncePower: 10,
         // Time control configuration:
         initialTimeFactor: this.childInitialTimeFactor,  // Start fast (0.3x time)
         timeFactorRate: this.childTimeFactorRate,        // Increase by 1.0/sec

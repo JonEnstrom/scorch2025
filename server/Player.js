@@ -4,7 +4,7 @@ import * as THREE from 'three';
 export default class Player {
     constructor(x, y, z) {
         this.position = new THREE.Vector3(x, y, z);
-        this.power =  200;
+        this.power =  20;
         this.turretPitch = 0;  
         this.turretYaw = 0;
         this.maxHealth = 100;
@@ -104,10 +104,10 @@ export default class Player {
 
     adjustPower(delta) {
         const newPower = this.power + delta;
-        this.power = THREE.MathUtils.clamp(newPower, 100, 1000);
+        this.power = THREE.MathUtils.clamp(newPower, 5, 100);
     }
     setPower(value) {
-        this.power = THREE.MathUtils.clamp(value, 100, 1000);
+        this.power = THREE.MathUtils.clamp(value, 5, 100);
     }
 
     setPosition(newPos) {
@@ -191,8 +191,8 @@ export default class Player {
     }
 
     getBarrelTip() {
-        const BARREL_LENGTH = 20;
-        const TURRET_HEIGHT = 20;
+        const BARREL_LENGTH = 2;
+        const TURRET_HEIGHT = 2;
         const tip = this.position.clone();
         tip.y += TURRET_HEIGHT;
         const direction = this.getFireDirection();
@@ -228,6 +228,6 @@ export default class Player {
          this.armor = 0;
          this.shield = 0;
          this.turretPitch = -45;
-         this.power = 200;
+         this.power = 20;
     }
 }

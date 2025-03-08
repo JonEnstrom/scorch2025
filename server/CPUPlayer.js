@@ -6,8 +6,8 @@ export default class CPUPlayer extends Player {
     super(x, y, z);
     this.isCPU = true;
     this.isReady = true;
-    this.minPower = 100;
-    this.maxPower = 700;
+    this.minPower = 5;
+    this.maxPower = 100;
     this.minPitch = -90;
     this.maxPitch = 10;
     this.turnTimeouts = new Set(); // Track active timeouts
@@ -68,7 +68,7 @@ export default class CPUPlayer extends Player {
       bounceCount: 0,
       doesCollide: true,
       craterSize: 20,
-      aoeSize: 50,
+      aoeSize: 5,
       baseDamage: 50,
       explosionSize: 1,
       explosionType: 'normal',
@@ -130,7 +130,7 @@ export default class CPUPlayer extends Player {
     // Try more iterations for better accuracy
     for (let iteration = 0; iteration < this.maxIterations; iteration++) {
       // Try combinations of pitch and power
-      for (let i = 0; i < 5; i++) {
+      for (let i = 0; i < 15; i++) {
         // Use weighted random within current bounds to focus on promising areas
         let pitch, power;
         
@@ -183,7 +183,7 @@ export default class CPUPlayer extends Player {
             };
             
             // If we're aiming for perfect hit and this is close enough, return immediately
-            if (this.perfectAim && distanceToTarget < 10) {
+            if (this.perfectAim && distanceToTarget < 2) {
               return bestSolution;
             }
           }
@@ -209,12 +209,12 @@ export default class CPUPlayer extends Player {
     return {
       yaw,
       pitch: -45,
-      power: 500
+      power: 50
     };
   }
   
   getAvailableWeapons() {
-    const weaponCodes = ['BW01', 'CW01', 'BB01', 'BR01', 'VW01', 'MM01', 'RF01', 'MS01', 'JB01', 'SP01'];
+    const weaponCodes = ['BW01', 'CW01', 'BB01', 'BR01', 'VW01', 'MM01', 'RF01', 'MS01', 'PC01', 'JB01', 'SP01', 'HK01', 'HK02'];
     return weaponCodes.filter(code => this.hasItem(code));
   }
 

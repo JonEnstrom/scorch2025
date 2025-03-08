@@ -1,7 +1,23 @@
 // vite.config.js
 import { defineConfig } from 'vite';
+import path from 'path';
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      'three/addons': path.resolve('node_modules/three/examples/jsm')
+    }
+  },
+
+  optimizeDeps: {
+    exclude: ['ammo.js']
+  },
+  build: {
+    commonjsOptions: {
+      include: [/ammo\.js/]
+    }
+  },
+  
   server: {
     port: 5173,
     proxy: {

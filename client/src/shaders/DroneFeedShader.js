@@ -7,9 +7,9 @@ export const DroneFeedShader = {
     tDiffuse:    { value: null },           // Scene render
     time:        { value: 0.0 },            // Time uniform for animating noise/glitches
     resolution:  { value: new THREE.Vector2() },
-    noiseAmount: { value: 0.02 },           // Intensity of noise
-    scanlineIntensity: { value: 0.2 },      // Strength of horizontal scan lines
-    colorOffset: { value: 0.002 }           // Offset factor for color-channel shifts
+    noiseAmount: { value: 0.01 },           // Intensity of noise
+    scanlineIntensity: { value: 0.1 },      // Strength of horizontal scan lines
+    colorOffset: { value: 0.001 }           // Offset factor for color-channel shifts
   },
 
   vertexShader: /* glsl */`

@@ -156,18 +156,18 @@ export default class ClusterWeapon {
       } else if (i < (this.clusterCount * 2) / 3) {
         // Second third: 1 bounce
         preImpactBounces = 1;
-        preImpactBouncePower = 200;
+        preImpactBouncePower = 20;
       } else {
         // Last third: 2 bounces
         preImpactBounces = 2;
-        preImpactBouncePower = 200;
+        preImpactBouncePower = 20;
       }
       
       // Create cluster projectile with parent momentum plus spread
       const subData = {
         startPos: apexPos.clone(),
         direction: direction,
-        power: 200,
+        power: 20,
         isFinalProjectile: isFinal,
         projectileStyle: 'bomblet',
         explosionSize: 1,

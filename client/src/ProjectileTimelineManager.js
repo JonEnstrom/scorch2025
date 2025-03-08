@@ -2,29 +2,39 @@ import { ClientProjectile } from "./Projectile";
 import * as THREE from 'three';
 import { ParticleSystem } from './ClaudeParticleSystem.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { EmitterPool } from './EmitterPool.js';
+import { ProjectileAudioSystem } from './ProjectileAudioSystem.js';
 
 export class ProjectileTimelineManager {
-    constructor(game, helicopterManager) {
+    constructor(game, helicopterManager, terrainRenderer) {
         this.game = game;
         this.events = [];
         this.simulationStartTime = 0;
         this.playbackActive = false;
         this.helicopterManager = helicopterManager;
         this.cameraAdjustedThisTimeline = false;
+        this.terrainRenderer = terrainRenderer;
+        this.audioSystem = new ProjectileAudioSystem(game);
         
         // Timeline events grouped by projectile ID for easier access
         this.projectileEventMap = new Map();
+        
+        // Pre-created projectiles mapped by ID
+        this.preCreatedProjectiles = new Map();
 
         this.particleSystem = new ParticleSystem({
-            texture: './particles/fire_01.png',
+            texture: './particles/smoke.png',
             maxParticles: 10000,
             camera: this.game.cameraManager.camera,
         });
         this.particleSystem.addToScene(this.game.scene, this.game.cameraManager.camera);
         
+        // Create the emitter pool
+        this.emitterPool = new EmitterPool(this.particleSystem);
+        
         // A smaller pool of lights (10). We'll place them at the first ten impact points.
         this.lights = [];
-        this.MAX_LIGHTS = 10;
+        this.MAX_LIGHTS = 0;
         this.initLights();
 
         // We'll create a small ephemeral sphere at each explosion spot for 300ms.
@@ -46,7 +56,9 @@ export class ProjectileTimelineManager {
             'missile',
             'balloon',
             'bomblet',
-            'spike_bomb'
+            'parabomblet',
+            'spike_bomb',
+            'projectile_1'
         ];
         
         // Preload all common models
@@ -185,10 +197,9 @@ export class ProjectileTimelineManager {
         }
     }
     
-
-    queueTimeline(timelineData) {
-        // Reset the event map for each new timeline
-        this.projectileEventMap.clear();
+    async queueTimeline(timelineData) {
+        // Reset previous timeline state
+        this.resetTimelineState();
         
         // Group events by projectile ID
         timelineData.forEach(event => {
@@ -207,6 +218,9 @@ export class ProjectileTimelineManager {
         this.events = [...timelineData];
         this.events.sort((a, b) => a.time - b.time);
         
+        // Pre-create all projectiles before starting the timeline
+        await this.preCreateAllProjectiles();
+        
         // Reset or start the playback clock
         this.simulationStartTime = performance.now();
         this.playbackActive = true;
@@ -218,7 +232,72 @@ export class ProjectileTimelineManager {
         this.placeLightsForImpacts(timelineData);
     }
     
-    createProjectileWithTrajectory(spawnEvent, moveEvents, impactEvent, currentTime) {
+    resetTimelineState() {
+
+        // Stop all active sounds
+        this.game.projectiles.forEach(projectile => {
+            if (projectile.projectileId) {
+                this.audioSystem.stopProjectileSound(projectile.projectileId);
+            }
+        });
+        // Clear previous projectiles and events
+        this.projectileEventMap.clear();
+        this.preCreatedProjectiles.clear();
+        
+        // Remove any existing projectiles from the scene
+        this.game.projectiles.forEach(projectile => {
+            projectile.destroy();
+        });
+        
+        this.game.projectiles = [];
+        this.game.projectileMap.clear();
+        
+        // Clear any remaining explosion spheres
+        this.explosionSpheres.forEach(sphereData => {
+            this.game.scene.remove(sphereData.mesh);
+            sphereData.mesh.geometry.dispose();
+            sphereData.mesh.material.dispose();
+        });
+        this.explosionSpheres = [];
+    }
+    
+    async preCreateAllProjectiles() {
+        const creationPromises = [];
+        
+        // Identify all unique projectile IDs that have spawn events
+        const spawnEvents = this.events.filter(evt => evt.type === 'projectileSpawn');
+        
+        // Pre-create each projectile in advance
+        for (const spawnEvent of spawnEvents) {
+            const projectileId = spawnEvent.projectileId;
+            
+            // Get all events for this projectile
+            const events = this.projectileEventMap.get(projectileId) || [];
+            
+            // Collect trajectory events
+            const moveEvents = events.filter(evt => evt.type === 'projectileMove');
+            const impactEvent = events.find(evt => 
+                evt.type === 'projectileImpact' || 
+                evt.type === 'projectileHelicopterImpact'
+            );
+            
+            // Create the projectile with full trajectory data
+            const creationPromise = this.preCreateProjectile(
+                spawnEvent, 
+                moveEvents, 
+                impactEvent
+            );
+            
+            creationPromises.push(creationPromise);
+        }
+        
+        // Wait for all projectiles to be created
+        await Promise.all(creationPromises);
+        
+        console.log(`Pre-created ${this.preCreatedProjectiles.size} projectiles for timeline`);
+    }
+    
+    async preCreateProjectile(spawnEvent, moveEvents, impactEvent) {
         // Create projectile data object
         const projectileData = {
             projectileId: spawnEvent.projectileId,
@@ -241,8 +320,8 @@ export class ProjectileTimelineManager {
         let projectileModel;
         
         try {
-            projectileModel = this.loadModel(modelPath);
-            projectileModel.scale.setScalar(projectileData.projectileScale);
+            projectileModel = await this.loadModel(modelPath);
+            projectileModel.scale.setScalar(projectileData.projectileScale / 10);
         } catch (error) {
             console.warn(`Failed to load model: ${modelPath}. Using default mesh.`, error);
             projectileModel = this.createDefaultMesh(
@@ -251,13 +330,14 @@ export class ProjectileTimelineManager {
             );
         }
         
-        // Create the projectile with the model
+        // Create the projectile with the model and emitter pool
         const projectile = new ClientProjectile(
             projectileData, 
             this.game.scene,
             this.game.terrainRenderer,
             this.particleSystem,
-            projectileModel
+            projectileModel,
+            this.emitterPool
         );
         
         // Add trajectory data
@@ -295,34 +375,48 @@ export class ProjectileTimelineManager {
         // Set the complete trajectory on the projectile
         projectile.setTrajectory(trajectory);
         
-        // Immediately update the projectile to the current time position
-        projectile.updateTrajectoryPosition(currentTime);
+        // Hide the projectile initially (will be shown at spawn time)
+        projectile.hide();
         
-        // Store it in the Game's arrays/maps
-        this.game.projectiles.push(projectile);
-        this.game.projectileMap.set(spawnEvent.projectileId, projectile);
+        // Store in our pre-created map
+        this.preCreatedProjectiles.set(spawnEvent.projectileId, {
+            projectile,
+            spawnEvent
+        });
         
-        // Adjust camera if needed
-        if (!this.cameraAdjustedThisTimeline) {
-            if (spawnEvent.weaponCode && spawnEvent.weaponCode.startsWith('RF01')) {
-                this.game.cameraManager.setView('projectile');
-                this.game.cameraManager.setProjectileTarget(projectile);
-            } else {
-                this.game.cameraManager.setView('chase');
-            }
-            this.cameraAdjustedThisTimeline = true;
-        }
+        return projectile;
     }
 
-    update(dt) {
+    update(deltaTime) {
         if (!this.playbackActive) return;
         
         const currentLocalTime = performance.now() - this.simulationStartTime;
         
-        // Update all projectiles with the current time
+        // Update all visible projectiles with the current time
         this.game.projectiles.forEach(projectile => {
             if (!projectile.isDestroyed) {
                 projectile.updateTrajectoryPosition(currentLocalTime);
+                
+                // Update audio based on trajectory progress, speed and position
+                if (projectile.trajectory && projectile.trajectory.length > 0) {
+                    const firstTime = projectile.trajectory[0].time;
+                    const lastTime = projectile.trajectory[projectile.trajectory.length - 1].time;
+                    const totalDuration = lastTime - firstTime;
+                    
+                    if (totalDuration > 0) {
+                        const progress = (currentLocalTime - firstTime) / totalDuration;
+                        
+                        // Pass the projectile and current time for more dynamic audio updates
+                        this.audioSystem.updateProjectileSound(
+                            projectile.projectileId, 
+                            progress,
+                            projectile,  // Pass the entire projectile object
+                            currentLocalTime  // Pass the current time for trajectory calculations
+                        );
+                    }
+                }
+                
+                projectile.updateVisual(deltaTime);
             }
         });
         
@@ -345,18 +439,18 @@ export class ProjectileTimelineManager {
             }
         }
         this.explosionSpheres = remainingSpheres;
-
+    
         // If no more events and no more projectiles, end playback
-// Instead of checking only projectiles, also check if there are no spheres left:
-if (
-    this.events.length === 0 &&
-    this.game.projectiles.length === 0 &&
-    this.explosionSpheres.length === 0
-  ) {
-    this.playbackActive = false;
-  }
-      }
+        if (
+            this.events.length === 0 &&
+            this.game.projectiles.length === 0 &&
+            this.explosionSpheres.length === 0
+        ) {
+            this.playbackActive = false;
+        }
+    }
 
+    
     handleEvent(evt, currentTime) {
         switch (evt.type) {
             case 'projectileSpawn':
@@ -366,52 +460,74 @@ if (
                 this.handleProjectileImpact(evt);
                 break;
             case 'projectileHelicopterImpact':
-                    this.handleProjectileImpact(evt);
-                    break;
+                this.handleProjectileImpact(evt);
+                break;
             case 'helicopterDamage':
-                    this.helicopterManager.handleHelicopterDamage(evt.helicopterId, evt.damage);
-                    break;
+                this.helicopterManager.handleHelicopterDamage(evt.helicopterId, evt.damage);
+                break;
             case 'helicopterDestroyed':
-                    this.helicopterManager.handleHelicopterDestroyed(evt.helicopterId, evt.position);
-                    break;        }
+                this.helicopterManager.handleHelicopterDestroyed(evt.helicopterId, evt.position);
+                break;
+        }
     }
     
     handleProjectileSpawn(spawnEvent, currentTime) {
-        // Check if we already have events for this projectile
-        if (!this.projectileEventMap.has(spawnEvent.projectileId)) {
-            console.warn('Received spawn event with no preloaded events:', spawnEvent);
+        // Get the pre-created projectile
+        const preCreatedData = this.preCreatedProjectiles.get(spawnEvent.projectileId);
+        
+        if (!preCreatedData) {
+            console.warn('No pre-created projectile found for spawn event:', spawnEvent);
             return;
         }
         
-        // Get all events for this projectile
-        const events = this.projectileEventMap.get(spawnEvent.projectileId);
+        const { projectile } = preCreatedData;
         
-        // Collect all move events for this projectile
-        const moveEvents = events.filter(evt => evt.type === 'projectileMove');
-        const impactEvent = events.find(evt => evt.type === 'projectileImpact');
+        // Show the projectile
+        projectile.show();
         
-        // Create the projectile with its full trajectory data
-        this.createProjectileWithTrajectory(spawnEvent, moveEvents, impactEvent, currentTime);
+        // Update position to current time
+        projectile.updateTrajectoryPosition(currentTime);
+
+        // Create sound for the projectile
+        this.audioSystem.createProjectileSound(
+            spawnEvent.projectileId,
+            projectile,
+            spawnEvent
+        );
         
-        // Remove this projectile's events from the map to free memory
-        this.projectileEventMap.delete(spawnEvent.projectileId);
+        // Add to game's active projectiles
+        this.game.projectiles.push(projectile);
+        this.game.projectileMap.set(spawnEvent.projectileId, projectile);
+        
+        // Adjust camera if needed
+        if (!this.cameraAdjustedThisTimeline && this.game.cameraManager.spectatorMode === 'auto') {
+            if (spawnEvent.weaponCode && spawnEvent.weaponCode.startsWith('RF01')) {
+                this.game.cameraManager.setView('projectile');
+                this.game.cameraManager.setProjectileTarget(projectile);
+            } else {
+                this.game.cameraManager.setView('chase');
+            }
+            this.cameraAdjustedThisTimeline = true;
+        }
     }
 
     handleProjectileImpact(evt) {
         const projectile = this.game.projectileMap.get(evt.projectileId);
         if (!projectile) return;
         
+        // Play impact sound
+        this.audioSystem.handleProjectileImpact(evt.projectileId, evt);
         // The projectile should already be at the impact position due to trajectory interpolation
         projectile.triggerExplosion(evt);
 
         // Create a visual sphere at the explosion spot for 300 ms
         const currentLocalTime = performance.now() - this.simulationStartTime;
         const sphere = new THREE.Mesh(
-            new THREE.SphereGeometry(12, 8, 8),
+            new THREE.SphereGeometry(1.2, 8, 8),
             new THREE.MeshBasicMaterial({ color: 0xffffdd })
         );
         const sphere2 = new THREE.Mesh(
-            new THREE.SphereGeometry(12, 8, 8),
+            new THREE.SphereGeometry(1.2, 8, 8),
             new THREE.MeshBasicMaterial({ color: 0xffffff })
         );
 
@@ -446,117 +562,21 @@ if (
         this.game.projectiles = this.game.projectiles.filter(p => p !== projectile);
     }
 
-createExplosionEffect(evt, projectile) {
-    const currentLocalTime = performance.now() - this.simulationStartTime;
-    
-    // Determine explosion color based on type
-    let explosionColor = 0xffffdd; // Default color
-    let flash2Color = 0xffffff;
-    
-    if (evt.explosionType === 'helicopter') {
-        explosionColor = 0xffaa33; // Orange for helicopter impacts
-        flash2Color = 0xff7700;
+    // Helper method to handle common projectile destruction logic
+    handleProjectileDestruction(projectile, evt) {
+        // Trigger explosion effect
+        projectile.triggerExplosion(evt);
+        
+        // Destroy and remove projectile
+        projectile.destroy();
+        this.game.projectileMap.delete(evt.projectileId);
+        this.game.projectiles = this.game.projectiles.filter(p => p !== projectile);
     }
-    
-    // Create primary explosion sphere
-    const sphere = new THREE.Mesh(
-        new THREE.SphereGeometry(evt.explosionSize * 1.5, 8, 8),
-        new THREE.MeshBasicMaterial({ color: explosionColor, transparent: true, opacity: 0.7 })
-    );
-    
-    // Create secondary flash
-    const sphere2 = new THREE.Mesh(
-        new THREE.SphereGeometry(evt.explosionSize, 8, 8),
-        new THREE.MeshBasicMaterial({ color: flash2Color, transparent: true, opacity: 0.9 })
-    );
-
-    // Enable bloom on the spheres
-    sphere.layers.enable(1);
-    sphere2.layers.enable(1);
-    
-    // Position the explosion
-    if (projectile.mesh) {
-        sphere.position.copy(projectile.mesh.position);
-        sphere2.position.copy(projectile.mesh.position);
-    } else {
-        sphere.position.copy(projectile.position);
-        sphere2.position.copy(projectile.position);
-    }
-    
-    // Add to scene
-    this.game.scene.add(sphere);
-    this.game.scene.add(sphere2);
-    
-    // Track for removal
-    this.explosionSpheres.push({
-        mesh: sphere,
-        expirationTime: currentLocalTime + 300
-    });
-    this.explosionSpheres.push({
-        mesh: sphere2,
-        expirationTime: currentLocalTime + 150
-    });
-}
-
-// Helper method to handle common projectile destruction logic
-handleProjectileDestruction(projectile, evt) {
-    // Trigger explosion effect
-    projectile.triggerExplosion(evt);
-    
-    // Create visual effect at explosion spot
-    this.createExplosionEffect(evt, projectile);
-    
-    // Destroy and remove projectile
-    projectile.destroy();
-    this.game.projectileMap.delete(evt.projectileId);
-    this.game.projectiles = this.game.projectiles.filter(p => p !== projectile);
-}
-
-// Create specialized helicopter impact explosion
-createHelicopterImpactExplosion(position, explosionSize, helicopterId) {
-    // Create a visual indicator of the impact
-    const impactFlash = new THREE.PointLight(0xffaa33, 2000, 1000);
-    impactFlash.position.copy(position);
-    this.game.scene.add(impactFlash);
-    
-    // Add to a list to remove after delay
-    const currentLocalTime = performance.now() - this.simulationStartTime;
-    const removeTime = currentLocalTime + 500; // 500ms flash
-    
-    // Track this light for removal
-    this.explosionSpheres.push({
-        mesh: impactFlash,
-        expirationTime: removeTime,
-        isLight: true
-    });
-    
-    // Create particles for the impact
-    this.particleSystem.createExplosion({
-        position: position,
-        count: Math.floor(explosionSize * 50),
-        speed: explosionSize * 0.8,
-        scale: explosionSize * 0.2,
-        duration: 1500,
-        color: 0xffaa33, // Orange-yellow for helicopter impacts
-        dispersionRadius: explosionSize * 0.5
-    });
-    
-    // Create debris particles
-    this.particleSystem.createExplosion({
-        position: position,
-        count: Math.floor(explosionSize * 15),
-        speed: explosionSize * 0.6,
-        scale: explosionSize * 0.1,
-        duration: 2000,
-        color: 0x333333, // Dark grey for helicopter debris
-        dispersionRadius: explosionSize * 0.3,
-        gravity: 9.8,
-        fadeOut: true
-    });
-}
-
     
     dispose() {
+        // Dispose of the emitter pool
+        this.emitterPool.dispose();
+        
         // Dispose and clear the model cache
         this.modelCache.forEach((model) => {
             model.traverse((child) => {
@@ -589,8 +609,15 @@ createHelicopterImpactExplosion(position, explosionSize, helicopterId) {
         });
         this.explosionSpheres = [];
 
+        // Dispose of pre-created projectiles
+        this.preCreatedProjectiles.forEach(({ projectile }) => {
+            projectile.destroy();
+        });
+        this.preCreatedProjectiles.clear();
+
         // Clean up other resources
         this.particleSystem.dispose();
+        this.audioSystem.dispose();
         this.events = [];
         this.projectileEventMap.clear();
     }

@@ -8,9 +8,9 @@ export class SprinklerWeapon {
     this.weaponCode = 'SW01';
 
     // Weapon configuration
-    this.circleSteps = 16;              // Total number of positions in the circle
+    this.circleSteps = 12;              // Total number of positions in the circle
     this.projectilesPerStep = 4;        // Number of projectiles per direction
-    this.projectilePowers = [50, 100, 350, 500]; // Power settings for each projectile
+    this.projectilePowers = [5, 10, 15, 20]; // Power settings for each projectile
     this.projectileDelay = 600;       
     this.verticalAngle = Math.PI / 3;   // 45 degrees upward angle for all projectiles
     
@@ -53,7 +53,7 @@ export class SprinklerWeapon {
       isInitialProjectile: true,  // Mark as initial projectile
       
       // Physics properties
-      gravity: -300,
+      gravity: -30,
       timeFactor: 1.0,
       
       // Visual properties
@@ -154,7 +154,7 @@ export class SprinklerWeapon {
           
           // Auto-bounce settings
           preImpactBounces: 1, // Auto-bounce once
-          preImpactBouncePower: 150,
+          preImpactBouncePower: 15,
           bounciness: this.bounciness,
           upwardBias: this.upwardBias,
           minVerticalVelocity: this.minVerticalVelocity,
@@ -163,7 +163,7 @@ export class SprinklerWeapon {
           bounceCraterSize: 0, // No crater on bounce
           
           // Physics
-          gravity: -300,
+          gravity: -30,
           timeFactor: 0.9, // Slightly faster than normal
           
           // Visual
@@ -175,7 +175,7 @@ export class SprinklerWeapon {
           
           // Damage (only applied on final impact)
           baseDamage: this.sprinklerDamage,
-          aoeSize: 50 // Area of effect for damage
+          aoeSize: 5 // Area of effect for damage
         };
         
         // Simulate this projectile

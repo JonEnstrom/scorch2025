@@ -117,43 +117,42 @@ export const WaterShader = {
     uniforms: {
         // Existing uniforms...
         uTime: { value: 0.0 },
-        uBaseColor: { value: new THREE.Color(0x0066cc) },
-        uFresnelColor: { value: new THREE.Color(0x88ccff) },
+        uBaseColor: { value: new THREE.Color(0x00dddd) },
+        uFresnelColor: { value: new THREE.Color(0x00ffff) },
         uSkyColor1: { value: new THREE.Color(0x87ceeb) },
         uSkyColor2: { value: new THREE.Color(0xf0f8ff) },
-        uSpecularColor: { value: new THREE.Color(0xffffff) },
-        uWaveSpeed: { value: 2.5 },
-        uWaveStrength: { value: 5.5 },
-        uFresnelPower: { value: 0.3 },
+        uSpecularColor: { value: new THREE.Color(0x00ffff) },
+        uWaveSpeed: { value: 0.2 },
+        uWaveStrength: { value: 0.5 },
+        uFresnelPower: { value: 1.0 },
         uSpecularIntensity: { value: 0.1 },
-        uOpacity: { value: 0.65 },
+        uOpacity: { value: 0.7 },
         tIntersections: { value: null },
         uIntersectionTextureSize: { value: 1.0 },
-        uBubbleCount: { value: 500.0 },
+        uBubbleCount: { value: 20.0 },
         uBubbleDriftSpeed: { value: 0.05 },
-        uBubbleColor: { value: new THREE.Color(0xddddff) },
+        uBubbleColor: { value: new THREE.Color(0xffffff) },
         uBubbleVisibility: { value: 0.6 },
         uBubbleSize: { value: 0.002 },
-        uFoamSlopeThreshold: { value: 1.0 },
-        uFoamColor: { value: new THREE.Color(0xddddff) },
+        uFoamColor: { value: new THREE.Color(0xffffff) },
         uFoamIntensity: { value: 0.7 },
         tReflection: { value: null },
         tEnvironment: { value: null },
-        uReflectionStrength: { value: 0.3 },
-        uEnvStrength: { value: 0.2 },
+        uReflectionStrength: { value: 0.1 },
+        uEnvStrength: { value: 0.1 },
 
         // NEW CAUSTICS UNIFORMS
-        uCausticsColor:   { value: new THREE.Color(0xffffff) },
-        uCausticsScale:   { value: 50.0 },
-        uCausticsSpeed:   { value: 0.02 },
-        uCausticsIntensity: { value: 0.02 },
+        uCausticsColor:   { value: new THREE.Color(0xaaaaaa) },
+        uCausticsScale:   { value: 80.0 },
+        uCausticsSpeed:   { value: 0.1 },
+        uCausticsIntensity: { value: 0.22 },
 
         // NEW RIPPLE UNIFORMS
-        uRippleAmplitude:    { value: 1.5 },
-        uRippleFrequency:    { value: 1.0 },
-        uRippleSpeed:        { value: 1.0 },
+        uRippleAmplitude:    { value: 1.0 },
+        uRippleFrequency:    { value: 10.0 },
+        uRippleSpeed:        { value: 0.2 },
         uRippleCenter:       { value: new THREE.Vector2(0.0, 0.5) },
-        uRippleStrength:     { value: 1.3 },
+        uRippleStrength:     { value: 50.0 },
     },
 
     vertexShader: `
@@ -296,21 +295,19 @@ export const WaterShader = {
             float size
         ) {
             float bubbles = 0.0;
+            float gradientThreshold = 0.0;
+            float edgeBias = 0.01;
 
-            float gradientThreshold = 0.0;  // How sharp an edge must be
-            float edgeBias          = 0.01; // For computing gradient
-
-            for (int i = 0; i < 200; i++) { 
-                // The loop count must be constant in GLSL; clamp here:
+            for (int i = 0; i < 200; i++) {
                 if(float(i) >= count) break;
-
-                vec2 seed   = vec2(float(i) * 13.45, float(i) * 7.89);
+                
+                vec2 seed = vec2(float(i) * 13.45, float(i) * 7.89);
                 vec2 randUV = vec2(hash21(seed), hash21(seed + 1.234));
-
-                float gCenter = texture2D(intersectionTex, randUV).g;
-                float gRight  = texture2D(intersectionTex, randUV + vec2(edgeBias, 0.0)).g;
-                float gUp     = texture2D(intersectionTex, randUV + vec2(0.0, edgeBias)).g;
-
+                
+                // Specify mip level explicitly with textureLod
+                float gCenter = textureLod(intersectionTex, randUV, 0.0).g;
+                float gRight = textureLod(intersectionTex, randUV + vec2(edgeBias, 0.0), 0.0).g;
+                float gUp = textureLod(intersectionTex, randUV + vec2(0.0, edgeBias), 0.0).g;
                 float gradX = abs(gCenter - gRight);
                 float gradY = abs(gCenter - gUp);
                 float gradMag = max(gradX, gradY);
@@ -349,7 +346,6 @@ export const WaterShader = {
         uniform vec3  uBubbleColor;
         uniform float uBubbleVisibility;
         uniform float uBubbleSize;
-        uniform float uFoamSlopeThreshold;
         uniform vec3  uFoamColor;
         uniform float uFoamIntensity;
         uniform sampler2D tReflection;
@@ -405,55 +401,75 @@ export const WaterShader = {
             vec3 baseCol = mix(uBaseColor, uBaseColor * 0.7, wN.x * 0.5 + 0.5);
             vec3 color = mix(baseCol, reflectionCol, reflectionFactor);
 
-            // ---------------------------
-            // 1) Bubbles near edges
-            // ---------------------------
-            float bubbleMask = edgeBubbles(vUv, tIntersections, uTime, uBubbleCount, uBubbleDriftSpeed, uBubbleSize);
-            color = mix(color, uBubbleColor, bubbleMask * uBubbleVisibility);
 
-            // ---------------------------
-            // 2) Dynamic Foam near intersections
-            // ---------------------------
-            vec3 intersectionData = texture2D(tIntersections, vUv).rgb;
+// ---------------------------
+// 2) Dynamic Foam near intersections
+// ---------------------------
+// Get intersection data - green channel contains the land/water transition
+vec3 intersectionData = texture2D(tIntersections, vUv).rgb;
 
-            // Base foam calculation using intersection slope data
-            float baseFoam = smoothstep(0.1, 0.7, intersectionData.y);
+// Create a gradient falloff from the shore
+float shoreDist = intersectionData.g;
+float baseFoam = smoothstep(0.0, 1.0, shoreDist);
 
-            // Animate foam with multi-layer noise
-            vec2 foamNoiseUV1 = vUv * 15.0 + vec2(uTime * 0.3, uTime * 0.2);
-            vec2 foamNoiseUV2 = vUv * 8.0 - vec2(uTime * 0.25, uTime * 0.15);
-            float noise1 = noise2D(foamNoiseUV1);
-            float noise2 = noise2D(foamNoiseUV2 * 1.7);
-            float noisePattern = mix(noise1, noise2, 0.5);
+// Create multi-layered noise for foam texture
+// Use different scales for each layer to add complexity
+vec2 foamNoiseUV1 = vUv * 125.0 + vec2(uTime * 0.2, uTime * 0.15);
+vec2 foamNoiseUV2 = vUv * 112.0 - vec2(uTime * 0.17, uTime * 0.11);
+vec2 foamNoiseUV3 = vUv * 117.0 + vec2(uTime * 0.1, -uTime * 0.13);
 
-            // Create pulsing threshold effect
-            float animatedThreshold = sin(uTime * 2.0 + noisePattern * 6.283) * 0.02;
-            float dynamicFoam = smoothstep(
-                0.1 - animatedThreshold, 
-                0.4 + animatedThreshold, 
-                intersectionData.y + noisePattern * 0.1
-            );
+float noise1 = noise2D(foamNoiseUV1);
+float noise2 = noise2D(foamNoiseUV2);
+float noise3 = noise2D(foamNoiseUV3);
 
-            // Add surface foam detail using FBM
-            vec2 fbmUV = vUv * 12.0 + vec2(uTime * 0.1, uTime * -0.08);
-            float foamDetail = fbm(fbmUV) * 0.4;
-            dynamicFoam = clamp(dynamicFoam + foamDetail, 0.0, 1.0);
+// Combine noise layers with different weights
+float noisePattern = noise1 * 0.5 + noise2 * 0.3 + noise3 * 0.2;
 
-            // Combine base and animated foam
-            float foamAmount = max(baseFoam, dynamicFoam);
+// Create foam detail that varies with distance from shore
+float foamDetailIntensity = mix(0.5, 0.1, shoreDist); // More detail near shore
+vec2 fbmUV = vUv * 4.0 + vec2(uTime * 0.08, -uTime * 0.06);
+float foamDetail = fbm(fbmUV) * foamDetailIntensity;
 
-            // Add edge turbulence using rotated noise
-            vec2 rotUV = vUv * 10.0 + waveNormal(vUv, uTime * 0.3) * 2.0;
-            float edgeNoise = noise2D(rotUV + uTime * 0.5);
-            foamAmount *= 1.0 + edgeNoise * 0.3;
+// Create dynamic foam that pulses and moves with waves
+float waveInfluence = (wN.x + wN.y) * 0.1; // Use wave normals to influence foam
+float timePulse = sin(uTime * 0.5 + noisePattern * 4.0) * 0.08;
+float dynamicThreshold = 0.2 + timePulse + waveInfluence;
 
-            // Final foam color with variation
-            vec3 foamCol = mix(
-                uFoamColor, 
-                uFoamColor * (0.9 + noisePattern * 0.3), 
-                smoothstep(0.3, 0.7, noise1)
-            );
-            color = mix(color, foamCol, foamAmount * uFoamIntensity);
+// Create primary foam with varied threshold based on noise and time
+float primaryFoam = smoothstep(
+    dynamicThreshold - 0.05, 
+    dynamicThreshold + 0.2, 
+    shoreDist + noisePattern * 0.15
+);
+
+// Add secondary foam patches that appear further out
+float secondaryFoam = smoothstep(
+    0.35 + timePulse,
+    0.45 + timePulse,
+    shoreDist + foamDetail
+) * (1.0 - shoreDist) * 0.4; // Fade out as we move away from shore
+
+// Create small bubbles/patches with sharper contrast near the shore
+float bubbleMask = step(0.7, noise1 * noise2) * smoothstep(0.5, 0.1, shoreDist) * 0.5;
+
+// Combine all foam elements
+float foamAmount = max(max(primaryFoam, secondaryFoam), bubbleMask);
+
+// Add variation to foam based on wave movement
+foamAmount *= 1.0 + (wN.x * 0.3 + wN.y * 0.3);
+
+// Add edge turbulence using rotated noise
+vec2 turbulenceUV = vUv * 15.0 + waveNormal(vUv, uTime * 0.25) * 3.0;
+float edgeNoise = noise2D(turbulenceUV);
+foamAmount = min(foamAmount * (1.0 + edgeNoise * 0.4), 1.0);
+
+// Final foam color with variation - add slight blue tint to parts of the foam for realism
+vec3 foamBaseColor = uFoamColor * (0.95 + noise3 * 0.1);
+vec3 foamTint = mix(foamBaseColor, uBaseColor * 1.2, noise2 * 0.3);
+vec3 finalFoamColor = mix(foamTint, foamBaseColor, primaryFoam);
+
+// Apply foam to the final color
+color = mix(color, finalFoamColor, foamAmount * uFoamIntensity);
             // ---------------------------
             // 3) Caustic Effect
             // ---------------------------
@@ -478,8 +494,8 @@ export const WaterShader = {
             // ---------------------------
             // Adjust lighting based on ripple-induced normals
             // Recalculate specular based on updated normals
-            vec3 lightDir = normalize(vec3(0.2, 1.0, 0.3));
-            float ndl = max(dot(vNormal, lightDir), 0.0);
+            vec3 lightDir = normalize(vec3(0.0, 1.0, 0.0));
+            float ndl = max(dot(vNormal, lightDir), 1.0);
             vec3 reflectDir = reflect(-lightDir, vNormal);
             float spec = pow(max(dot(reflectDir, vViewDir), 0.0), 64.0) * ndl; // Lower shininess for broader highlights
             color += uSpecularColor * spec * uSpecularIntensity;

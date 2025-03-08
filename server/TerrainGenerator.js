@@ -6,8 +6,8 @@ const DEFAULT_DROPLET_YIELD_INTERVAL = 100; // For droplet iterations in hydraul
 
 export default class TerrainGenerator {
   constructor(options = {}) {
-    this.width = options.width || 2400;
-    this.depth = options.depth || 2400;
+    this.width = options.width || 240;
+    this.depth = options.depth || 240;
     this.segments = options.segments || 250;
     this.seed = options.seed || Math.floor(Math.random() * 10000);
     this.theme = options.theme || 'grassland';
@@ -29,28 +29,28 @@ export default class TerrainGenerator {
     // Terrain configuration
     this.config = {
       base: {
-        scale: 0.001,
-        amplitude: 200,
+        scale: 0.01,
+        amplitude: 20,
         octaves: 6,
         persistence: 0.5,
         ridgeThreshold: 0.7
       },
       detail: {
-        scale: 0.002,
-        amplitude: 50,
+        scale: 0.02,
+        amplitude: 5,
         octaves: 4,
         persistence: 0.6
       },
       mountains: {
-        scale: 0.001,
-        amplitude: 400,
+        scale: 0.01,
+        amplitude: 40,
         octaves: 4,
         persistence: 0.5,
         rangeWidth: 0.25
       },
       erosion: {
-        iterations: 15,
-        dropletCount: 100000,
+        iterations: 25,
+        dropletCount: 1000,
         erosionStrength: 0.5,
         depositionStrength: 0.9
       }
@@ -226,7 +226,7 @@ export default class TerrainGenerator {
   }
 
   async smoothVertices() {
-    const threshold = 3;
+    const threshold = 0.25;
     const smoothingFactor = 0.7;
     const originalHeights = new Float32Array(this.heightData);
     for (let z = 1; z < this.segments; z++) {

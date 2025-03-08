@@ -44,15 +44,13 @@ export class DamageNumberManager {
    */
   createDamageNumber(damage, position, options = {}) {
     const {
-      initialVelocity = 50,
+      initialVelocity = 5,
       drag = 0.995,
       lifetime = 15.0,
-      camera = this.cameraManager.camera,
-      fontSize = 10,
-      depth: depth = 3,
+      fontSize = 1.5,
+      depth: depth = 0.5,
       curveSegments = 12,
       fontColor = null,
-      bold = false, // not used for 3D text, maintained for interface compatibility.
     } = options;
 
     // Ensure the font has been loaded.
@@ -69,7 +67,10 @@ export class DamageNumberManager {
       size: fontSize,
       depth: depth,
       curveSegments: curveSegments,
-      bevelEnabled: false,
+      bevelEnabled: true,
+      bevelSegments: 1,
+      bevelThickness: 0.1,
+      bevelSize: 0.1
     });
 
     // Center the geometry.
@@ -94,13 +95,15 @@ export class DamageNumberManager {
     const textMaterial = new THREE.MeshStandardMaterial({
       color: materialColor,
       depthTest: false,
+      depthWrite: false,
+      transparent: true,
     });
     
     // Create the mesh.
     const textMesh = new THREE.Mesh(textGeometry, textMaterial);
     textMesh.position.copy(position);
     // Apply a vertical offset so the damage number appears above the impact point.
-    textMesh.position.y += 40;
+    textMesh.position.y += 4;
 
     // Generate a random angle between -45 and 45 degrees for initial velocity.
     const angleInRadians = THREE.MathUtils.degToRad(THREE.MathUtils.randFloat(-45, 45));

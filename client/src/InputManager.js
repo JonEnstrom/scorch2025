@@ -1,4 +1,4 @@
-export class GameInput {
+export class InputManager {
     constructor(game, socket) {
         this.game = game;
         this.socket = socket;

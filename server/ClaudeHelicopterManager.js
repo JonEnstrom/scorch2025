@@ -9,19 +9,19 @@ class HelicopterManager {
     
     // Default options
     this.options = {
-      minHeight: 100, // Height above terrain in units
-      maxSpeed: 200, // Forward speed in units per second
-      minSpeed: 50,
+      minHeight: 20, // Height above terrain in units
+      maxSpeed: 20, // Forward speed in units per second
+      minSpeed: 5,
       maxYawRate: Math.PI / 3, // Maximum rotation rate in radians per second
       timeStep: 0.1, // Simulation time step in seconds (keep at 0.1 for accuracy)
       clientDataReductionFactor: 2, // Reduce data points sent to client by this factor
-      mapSize: 1800, // Map size 
-      raycastDistance: 300, // How far ahead to check for terrain
+      mapSize: 180, // Map size 
+      raycastDistance: 30, // How far ahead to check for terrain
       maxHelicopters: 5, // Maximum number of helicopters in the world
       simAheadTime: 120, // How many seconds of flight path to pre-calculate
       baseHealth: 100, // Base health for helicopters
-      spawnDistance: 1000, // Distance outside map to spawn helicopters
-      fixedHeight: 1000, // Fixed height for spawn/exit points
+      spawnDistance: 100, // Distance outside map to spawn helicopters
+      fixedHeight: 150, // Fixed height for spawn/exit points
       maxWaypoints: 8, // Maximum number of waypoints before forcing an exit
       maxFlightTime: 100, // Maximum flight time (in seconds) before forcing an exit
       ...options

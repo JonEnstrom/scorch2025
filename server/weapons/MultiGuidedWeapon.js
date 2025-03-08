@@ -4,7 +4,7 @@ import * as THREE from 'three';
 export default class MultiGuidedWeapon {
   constructor(projectileManager) {
     this.projectileManager = projectileManager;
-    this.weaponCode = 'MGW01';  // New weapon code for the multi-guided weapon
+    this.weaponCode = 'GW02'; 
     this.id = uuidv4();
 
     // Register custom impact handler
@@ -23,7 +23,7 @@ export default class MultiGuidedWeapon {
     
     // Calculate future time (6 seconds ahead)
     const currentTime = Date.now();
-    const futureTime = currentTime + 6000; // 6 seconds in milliseconds
+    const futureTime = currentTime + 8000; // 6 seconds in milliseconds
     
     // Filter helicopters to only target those that will be within -1200 to +1200 on both X and Y axes in 6 seconds
     const helicopters = allHelicopters.filter(helicopter => {
@@ -36,10 +36,10 @@ export default class MultiGuidedWeapon {
       
       // Check if the future position is within our boundary
       return (
-        futurePosition.position.x >= -1200 && 
-        futurePosition.position.x <= 1200 && 
-        futurePosition.position.x >= -1200 && 
-        futurePosition.position.x <= 1200
+        futurePosition.position.x >= -120 && 
+        futurePosition.position.x <= 120 && 
+        futurePosition.position.x >= -120 && 
+        futurePosition.position.x <= 120
       );
     });
     
@@ -48,9 +48,7 @@ export default class MultiGuidedWeapon {
       this._fireUnguided(tank, playerId, gameCore, spawnPos, direction, power);
       return;
     }
-    
-    console.log(`Firing ${helicopters.length} guided missiles, targeting helicopters that will be within range (-1200 to +1200 on X and Y axes) in 6 seconds`);
-    
+        
     // Create projectile data for each helicopter
     const projectileData = helicopters.map((helicopter, index) => {
       // Slightly vary the initial direction for visual effect
@@ -79,9 +77,9 @@ export default class MultiGuidedWeapon {
         // Guided missile specific properties
         isGuided: true,
         targetHelicopterId: helicopter.id,
-        maxTurnRate: 0.05,  // Radians per simulation step
-        guidanceDelay: 2000 + (index * 300), // Stagger guidance activation for visual effect
-        acceleration: 330   // Slightly slower than the original
+        maxTurnRate: 0.08,  // Radians per simulation step
+        guidanceDelay: 1000 + (index * 300), // Stagger guidance activation for visual effect
+        acceleration: 33   
       };
     });
     

@@ -268,6 +268,7 @@ export default class GameCore {
         id: userId,
         state: player.getState(),
         isPreGame: isPreGame,
+        isSpectator: player.isSpectator,
       });
     } else {
       socketWrapper.broadcast.to(this.gameId).emit('playerRejoined', {
@@ -281,11 +282,19 @@ export default class GameCore {
       players: this.playerManager.getAllPlayerStates(),
       playerId: userId,
       currentPlayerId: this.playerManager.currentPlayer,
-      gameState: this.gameState,
       turnTimeRemaining: this.playerManager.getTimeLeft(),
+      turnStartTime: this.playerManager.turnManager.turnStartTime,
+      gameState: this.gameState,
       currentRound: this.roundManager.currentRound,
       totalRounds: this.roundManager.totalRounds,
     });
+
+    socketWrapper.emit('turnUpdate', {
+      currentPlayerId: this.playerManager.currentPlayer,
+      turnTimeRemaining: this.playerManager.getTimeLeft(),
+      turnStartTime: this.playerManager.turnManager.turnStartTime,
+    });
+  
 
 if (this.helicopterManager) {
   setTimeout(() => {
@@ -340,14 +349,7 @@ if (this.helicopterManager) {
       if (gonePlayer.isSpectator) {
         console.log(`[SPECTATOR LEFT] Spectator ${gonePlayer.getName()} removed from game [${this.gameId}]`);
       }
-      
-      delete this.playerManager.players[userId];
-      this.playerManager.turnManager.removePlayer(userId);
-      
-      this.networking.io.to(this.gameId).emit('playerLeft', {
-        id: userId,
-        state: gonePlayer.getState()
-      });
+      this.playerManager.removePlayerPermanently(userId);
     } else {
       this.playerManager.setPlayerOffline(userId);
       
@@ -371,12 +373,11 @@ if (this.helicopterManager) {
     const themes = ['grassland', 'arctic', 'desert'];
     const randomTheme = themes[Math.floor(Math.random() * themes.length)];
 
-    // Create a new TerrainManager instance with the desired seed and theme.
     this.terrainManager = new TerrainManager({
       seed: this.seed * 10,
-      theme: randomTheme
+      theme: this.theme === 'random' ? randomTheme : this.theme,
     });
-
+    
     // Await the asynchronous terrain generation.
     this.terrainManager.terrainData = await this.terrainManager.generator.generate();
 

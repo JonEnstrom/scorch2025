@@ -22,7 +22,7 @@ class SimulatedProjectile {
     this.bounceCount = data.bounceCount || 0;
     this.doesCollide = data.doesCollide ?? true;
     this.craterSize = data.craterSize ?? 20;
-    this.aoeSize = data.aoeSize ?? 50;
+    this.aoeSize = data.aoeSize ?? 5;
     this.baseDamage = data.baseDamage ?? 50;
     this.explosionSize = data.explosionSize ?? 1;
     this.explosionType = data.explosionType ?? 'normal';
@@ -32,7 +32,8 @@ class SimulatedProjectile {
     // Guided
     this.isGuided = data.isGuided ?? false;
     this.targetHelicopterId = data.targetHelicopterId || null;
-    this.maxTurnRate = data.maxTurnRate ?? 0.05; // Radians per simulation step
+    this.maxTurnRate = data.maxTurnRate ?? 0.05; // Base turn rate in radians per simulation step
+    this.addedTurnRatePerSecond = data.addedTurnRatePerSecond ?? 0; // Rate of increase for turn rate
     this.guidanceDelay = data.guidanceDelay ?? 500; // ms before guidance kicks in
 
     // Bounce behavior
@@ -51,8 +52,8 @@ class SimulatedProjectile {
     // Physics properties
     this.maxSpeed = this.power;
     this.currentSpeed = 0;
-    this.acceleration = data.acceleration ?? 300;
-    this.gravity = data.gravity ?? -300;
+    this.acceleration = data.acceleration ?? 30;
+    this.gravity = data.gravity ?? -30;
 
     // Adaptive simulation properties
     this.minTimeStep = data.minTimeStep ?? 1; // Minimum simulation step in ms
@@ -334,8 +335,14 @@ export default class PrecalculatedProjectileManager {
             const currentDirVec = direction.clone();
             const angleToTarget = currentDirVec.angleTo(toTarget);
             
-            // Apply max turn rate constraint
-            const maxAngleChange = projectile.maxTurnRate;
+            // Calculate elapsed time in seconds for turn rate adjustment
+            const elapsedSeconds = realTimeAccumulator / 1000;
+            
+            // Calculate the dynamic turn rate that increases over time
+            const dynamicTurnRate = projectile.maxTurnRate + (projectile.addedTurnRatePerSecond * elapsedSeconds);
+            
+            // Apply max turn rate constraint with the dynamic rate
+            const maxAngleChange = dynamicTurnRate;
             
             if (angleToTarget > maxAngleChange) {
               // We need to adjust direction partially towards target
@@ -367,12 +374,11 @@ export default class PrecalculatedProjectileManager {
             // Update velocity direction but preserve speed for now
             velocity.copy(direction).multiplyScalar(speedBeforeUpdate);
             
-            // once guidance mode is active (with no max speed limit)
+            // once guidance mode is active
             const guidedAccelerationRate = projectile.guidedAccelerationRate || (projectile.acceleration * 0.3);
             // Calculate the new speed before applying the cap
             let newSpeed = speedBeforeUpdate + guidedAccelerationRate * (simulationTimeStep / 1000);
-            // Limit the speed to 300
-            currentSpeed = Math.min(newSpeed, 750);
+            currentSpeed = Math.min(newSpeed, 100);
             
             // Apply the new speed to velocity while preserving direction
             velocity.normalize().multiplyScalar(currentSpeed);
@@ -391,7 +397,8 @@ export default class PrecalculatedProjectileManager {
                   z: helicopterState.position.z 
                 },
                 distanceToTarget: distanceToTarget,
-                currentSpeed: currentSpeed // NEW: Add current speed to event data
+                currentSpeed: currentSpeed, // NEW: Add current speed to event data
+                currentTurnRate: dynamicTurnRate // NEW: Add current turn rate to event data
               });
             }
           }
@@ -406,7 +413,8 @@ export default class PrecalculatedProjectileManager {
           previousPosition, 
           position, 
           collisionTime, 
-          projectile.collisionRadius
+          projectile.collisionRadius,
+          projectile.isGuided  // Pass isGuided flag to determine helicopter radius
         );
         
         if (helicopterCollision) {
@@ -524,9 +532,10 @@ export default class PrecalculatedProjectileManager {
    * @param {THREE.Vector3} end - Ending position
    * @param {number} time - Current simulation time
    * @param {number} radius - Collision radius
+   * @param {boolean} isGuided - Whether the projectile is guided
    * @return {Object|null} Collision information or null if no collision
    */
-  _checkHelicopterCollision(start, end, time, radius) {
+  _checkHelicopterCollision(start, end, time, radius, isGuided) {
     if (!this.helicopterManager) return null;
     
     const direction = end.clone().sub(start);
@@ -560,8 +569,11 @@ export default class PrecalculatedProjectileManager {
         const dz = helicopterPos.z - pointObj.z;
         const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
         
-        // Helicopter collision radius (hardcoded for now, could be made configurable)
-        const helicopterRadius = 25;
+        // Use different helicopter collision radius based on projectile type
+        // Guided missiles have a smaller radius for precision
+        // Regular projectiles have a larger radius for easier hits
+        const helicopterRadius = isGuided ? 2.5 : 7.5;
+        
         if (distance < (radius + helicopterRadius)) {
           return {
             helicopterId,
@@ -891,17 +903,14 @@ export default class PrecalculatedProjectileManager {
     
         // Area-of-effect damage
         if (distance < event.aoeSize) {
-          const falloffPercent = (distance / event.aoeSize) * 0.5;
-          const damageMultiplier = 1 - falloffPercent;
-          const damage = Math.round(event.damage * damageMultiplier);
     
           // Only apply damage if greater than zero
-          if (damage > 0) {
-            const damageResult = ArmorShieldManager.applyDamage(player, damage);
+          if (event.damage > 0) {
+            const damageResult = ArmorShieldManager.applyDamage(player, event.damage);
       
             this.io.to(this.gameId).emit('playerDamaged', {
               id: userId,
-              damage: damage,
+              damage: event.damage,
               damageDistribution: damageResult,
               currentHealth: player.getHealth()
             });

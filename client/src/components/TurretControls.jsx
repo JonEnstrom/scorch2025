@@ -35,6 +35,9 @@ const TurretControls = () => {
   // Determine if it's the local player's turn
   const isMyTurn = localPlayerId === currentTurnPlayerId;
 
+  // Add state for camera mode
+  const [cameraMode, setCameraMode] = useState('auto'); // 'auto' or 'fly'
+
   /***********************
    * Turret Pitch & Power *
    ***********************/
@@ -278,6 +281,18 @@ const TurretControls = () => {
     queueInputUpdate({ power: newPower });
   };
 
+  // Handler for camera mode toggle
+  const handleCameraModeChange = (mode) => {
+    setCameraMode(mode);
+    if (game && game.cameraManager) {
+      if (mode === 'auto') {
+        game.cameraManager.setFreeflyMode('auto');
+      } else {
+        game.cameraManager.setFreeflyMode('freeFly');
+      }
+    }
+  };
+
   return (
     <>
       {/* Left slider for turret pitch */}
@@ -303,8 +318,8 @@ const TurretControls = () => {
           <label className="slider-label">Power</label>
           <input
             type="range"
-            min="100"
-            max="700"
+            min="5"
+            max="100"
             value={Math.round(displayPower)}
             onChange={handlePowerChange}
             disabled={!isMyTurn}
@@ -313,15 +328,56 @@ const TurretControls = () => {
         </div>
       </div>
 
-      {/* Turn indicator */}
+      {/* Turn indicator with camera mode toggle for spectators */}
       <div
         className="turn-indicator"
         style={{
           backgroundColor: isMyTurn ? 'green' : 'red',
-          color: '#fff'
+          color: '#fff',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          padding: '8px'
         }}
       >
-        {isMyTurn ? "Your Turn!" : "Spectating"}
+        <div>{isMyTurn ? "Your Turn!" : "Spectating"}</div>
+        
+        {/* Camera mode toggle - only show when spectating */}
+        {!isMyTurn && (
+          <div className="camera-mode-toggle" style={{ marginTop: '5px' }}>
+            <div style={{ fontSize: '12px', marginBottom: '3px' }}>Camera Mode:</div>
+            <div style={{ display: 'flex', gap: '5px' }}>
+              <button
+                onClick={() => handleCameraModeChange('auto')}
+                style={{
+                  backgroundColor: cameraMode === 'auto' ? '#00aa00' : '#333',
+                  border: 'none',
+                  borderRadius: '3px',
+                  padding: '3px 8px',
+                  fontSize: '12px',
+                  color: 'white',
+                  cursor: 'pointer'
+                }}
+              >
+                Auto
+              </button>
+              <button
+                onClick={() => handleCameraModeChange('fly')}
+                style={{
+                  backgroundColor: cameraMode === 'fly' ? '#00aa00' : '#333',
+                  border: 'none',
+                  borderRadius: '3px',
+                  padding: '3px 8px',
+                  fontSize: '12px',
+                  color: 'white',
+                  cursor: 'pointer'
+                }}
+              >
+                Free Fly
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </>
   );

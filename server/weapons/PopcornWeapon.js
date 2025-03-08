@@ -10,7 +10,7 @@ export class PopcornWeapon {
     // Weapon configuration
     this.maxBounces = 5;                // Maximum bounces per child projectile
     this.numChildren = 2;               // Number of child projectiles to spawn per impact
-    this.bounceRadius = 15;             // Base radius for bounce spread
+    this.bounceRadius = 1.5;             // Base radius for bounce spread
     this.radiusVariance = 0.8;          // Variance in bounce radius
 
     // Physics and timing settings
@@ -32,9 +32,9 @@ export class PopcornWeapon {
     this.craterSize = 15;               // Size of terrain deformation
     
     // Trajectory settings
-    this.basePower = 150;               // Initial projectile power
+    this.basePower = 15;               // Initial projectile power
     this.verticalBias = 1.7;            // How much to bias upward bounces
-    this.gravity = -800;               // Gravity for trajectories
+    this.gravity = -80;               // Gravity for trajectories
 
     // Register weapon handler
     projectileManager.registerWeaponHandler(
@@ -61,7 +61,7 @@ export class PopcornWeapon {
       isParentProjectile: true,  // Mark as parent projectile
       
       // Physics properties
-      gravity: -300,
+      gravity: -30,
       timeFactor: this.baseTimeFactor,
       minTimeFactor: this.baseTimeFactor,
       

@@ -50,9 +50,9 @@ export class FoliageManager {
             },
             snowyStump: {
                 textures: {
-                    color: 'textures/arctic/foliage/snowy_stump_color.jpg',
-                    normal: 'textures/arctic/foliage/snowy_stump_normal.jpg',
-                    roughness: 'textures/arctic/foliage/snowy_stump_roughness.jpg',
+                    color: 'textures/desert/foliage/desert_plants_color.jpg',
+                    normal: 'textures/desert/foliage/desert_plants_normal.jpg',
+                    roughness: 'textures/desert/foliage/desert_plants_roughness.jpg',
                 }
             },
         };
@@ -110,8 +110,8 @@ export class FoliageManager {
             arctic: [
                 {
                     id: 'snowy_stump',
-                    model: 'models/foliage/arctic/snowy_stump.glb',
-                    materialId: 'snowyStump',
+                    model: 'models/foliage/desert/desert_plant_1.glb',
+                    materialId: 'desertPlants',
                     weight: 1.0,
                     castShadow: true
                 },

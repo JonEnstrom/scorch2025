@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { ProjectileWorkerPoolInstance } from './ProjectileWorkerPoolInstance.js';
 
 export class ClientProjectile {
-  constructor(projectileData, scene, terrainRenderer, particleSystem, model) {
+  constructor(projectileData, scene, terrainRenderer, particleSystem, model, emitterPool) {
     const {
       projectileId,
       playerId,
@@ -25,97 +25,8 @@ export class ClientProjectile {
     this.weaponId = weaponId;
     this.weaponCode = weaponCode;
     this.particleSystem = particleSystem;
+    this.emitterPool = emitterPool;
     
-    this.explosion = this.particleSystem.createBurstEmitter({
-      particleCount: 16,
-      particleSize: { min: 50, max: 80 },
-      particleSizeEnd: { min: 20, max: 30 },
-      lifeTime: { min: 1.0, max: 1.75 },
-      color: new THREE.Color(0xff8800),
-      colorEnd: new THREE.Color(0x666600),
-      velocity: { 
-        min: new THREE.Vector3(-70, 100, -70), 
-        max: new THREE.Vector3(70, 0, 70) 
-      },
-      blending: THREE.NormalBlending,
-      opacity: { min: 0.3, max: 0.3 },
-      opacityEnd: { min: 0.0, max: 0.0 },
-      rotationSpeed: { min: 0.0, max: 0.0 },
-    });
-
-    this.explosionFlash = this.particleSystem.createBurstEmitter({
-      particleCount: 50,
-      particleSize: { min: 20, max: 40 },
-      particleSizeEnd: { min: 2, max: 4 },
-      lifeTime: { min: 0.2, max: 0.2 },
-      color: new THREE.Color(0xff0000),
-      colorEnd: new THREE.Color(0xffff00),
-      blending: THREE.NormalBlending,
-      opacity: { min: 0.3, max: 0.3 },
-      opacityEnd: { min: 0.0, max: 0.0 },
-      rotationSpeed: { min: 0.0, max: 0.0 },
-    });
-
-    this.smoke = this.particleSystem.createBurstEmitter({
-      texture: './particles/smoke.png',
-      particleCount: 1,
-      particleSize: { min: 50, max: 100 },
-      particleSizeEnd: { min: 200, max: 1000 },
-      lifeTime: { min: 10.0, max: 25.0 },
-      color: new THREE.Color(0x333333),
-      colorEnd: new THREE.Color(0x888888),
-      velocity: { 
-        min: new THREE.Vector3(0, 10, 0), 
-        max: new THREE.Vector3(1, 50, 1) 
-      },
-      blending: THREE.NormalBlending,
-      opacity: { min: 0.3, max: 0.3 },
-      opacityEnd: { min: 0.0, max: 0.0 },
-      rotationSpeed: { min: 0.0, max: 0.0 },
-    });
-
-    this.trail = this.particleSystem.createContinuousEmitter({
-      emissionRate: 150, // Particles per second
-      duration: -1,
-      particleSize: { min: 2, max: 4 },
-      particleSizeEnd: { min: 2, max: 4 },
-      lifeTime: { min: 3, max: 5 },
-      color: new THREE.Color(0x888899),
-      colorEnd: new THREE.Color(0xaaaaaa),
-      blending: THREE.NormalBlending,
-      rotationSpeed: { min: 0.0, max: 0.0 },
-      velocity: { 
-        min: new THREE.Vector3(-0.2, -0.2, -0.2), 
-        max: new THREE.Vector3(0.2, 0.2, 0.2) 
-      },
-      opacity: { min: 0.3, max: 0.5},
-      opacityEnd: { min: 0.0, max: 0.0 },
-      useDirectionalScaling: true,
-      directionalScaling: 3.0
-    });
-    this.trail.activate();
-
-    this.burnTrail = this.particleSystem.createContinuousEmitter({
-      emissionRate: 40, // Particles per second
-      duration: -1,
-      particleSize: { min: 3, max: 3 },
-      particleSizeEnd: { min: 2, max: 2 },
-      lifeTime: { min: 0.05, max: 0.2 },
-      color: new THREE.Color(0xff0000),
-      colorEnd: new THREE.Color(0xffff00),
-      blending: THREE.NormalBlending,
-      rotationSpeed: { min: 0.0, max: 0.0 },
-      velocity: { 
-        min: new THREE.Vector3(-0.2, -0.2, -0.2), 
-        max: new THREE.Vector3(0.2, 0.2, 0.2) 
-      },
-      opacity: { min: 1, max: 1},
-      opacityEnd: { min: 0.5, max: 0.5 },
-      useDirectionalScaling: true,
-      directionalScaling: 3.0
-    });
-    this.burnTrail.activate();
-
     // Position management
     this.position = new THREE.Vector3(startPos.x, startPos.y, startPos.z);
     this.currentPosition = new THREE.Vector3(startPos.x, startPos.y, startPos.z);
@@ -143,8 +54,11 @@ export class ClientProjectile {
     // For offloading trajectory calculations
     this.pendingTrajectoryUpdate = false;
 
-    // Configure projectile style
+    // Configure projectile style - must be called before setting up emitters
     this.configureProjectile();
+    
+    // Initialize emitters based on the configuration
+    this.setupEmitters();
     
     // Set up the model - directly use the provided model
     this.mesh = model;
@@ -156,6 +70,58 @@ export class ClientProjectile {
       if (this.rotationConfig && this.rotationConfig.type === 'velocity') {
         this.setOrientation(this.direction);
       }
+    }
+  }
+
+  setupEmitters() {
+    // Always borrow explosion-related emitters
+    this.explosion = this.emitterPool.borrowEmitter('explosion', this.projectileId);
+    this.explosionFlash = this.emitterPool.borrowEmitter('explosionFlash', this.projectileId);
+    this.smoke = this.emitterPool.borrowEmitter('smoke', this.projectileId);
+    
+    // Only borrow trail emitters if the configuration requires them
+    if (this.trailType !== 'none') {
+      this.trail = this.emitterPool.borrowEmitter(this.trailType, this.projectileId);
+      if (this.trail) {
+        this.trail.activate();
+      }
+    }
+    
+    if (this.burnTrailType !== 'none') {
+      this.burnTrail = this.emitterPool.borrowEmitter(this.burnTrailType, this.projectileId);
+      if (this.burnTrail) {
+        this.burnTrail.activate();
+      }
+    }
+  }
+
+  hide() {
+    if (this.mesh) {
+      this.mesh.visible = false;
+    }
+    
+    // Also hide any active particle emitters
+    if (this.trail) {
+      this.trail.deactivate();
+    }
+    
+    if (this.burnTrail) {
+      this.burnTrail.deactivate();
+    }
+  }
+  
+  show() {
+    if (this.mesh) {
+      this.mesh.visible = true;
+    }
+    
+    // Re-activate continuous emitters if they exist
+    if (this.trail) {
+      this.trail.activate();
+    }
+    
+    if (this.burnTrail) {
+      this.burnTrail.activate();
     }
   }
 
@@ -206,12 +172,9 @@ export class ClientProjectile {
           this.mesh.position.copy(this.position);
         }
 
-        let offsetDistance = 10;
-        let offset = this.direction.clone().multiplyScalar(offsetDistance);
-        this.trail.setPosition(this.position.clone().sub(offset));
-        offsetDistance = 3;
-        offset = this.direction.clone().multiplyScalar(offsetDistance);
-        this.burnTrail.setPosition(this.position.clone().sub(offset));
+        // Update trail positions
+        this.updateTrailPositions();
+        
         this.pendingTrajectoryUpdate = false;
       })
       .catch(err => {
@@ -220,6 +183,20 @@ export class ClientProjectile {
       });
 
     this.pendingTrajectoryUpdate = true;
+  }
+  
+  updateTrailPositions() {
+    if (this.trail) {
+      let offsetDistance = 3;
+      let offset = this.direction.clone().multiplyScalar(offsetDistance);
+      this.trail.setPosition(this.position.clone().sub(offset));
+    }
+    
+    if (this.burnTrail) {
+      let offsetDistance = 0.5;
+      let offset = this.direction.clone().multiplyScalar(offsetDistance);
+      this.burnTrail.setPosition(this.position.clone().sub(offset));
+    }
   }
   
   // Update visual elements (like rotation)
@@ -248,11 +225,8 @@ export class ClientProjectile {
   configureProjectile() {
     const styles = {
       missile: {
-        trailConfig: {
-          trailType: 'basic',
-          trailSize: this.projectileScale,
-          emitRate: 50
-        },
+        trailType: 'trail',
+        burnTrailType: 'burnTrail',
         rotation: {
           type: 'velocity', 
           rotationAxis: null,
@@ -260,11 +234,8 @@ export class ClientProjectile {
         }
       },
       balloon: {
-        trailConfig: {
-          trailType: 'none',
-          trailSize: this.projectileScale,
-          emitRate: 0
-        },
+        trailType: 'none',
+        burnTrailType: 'none',
         rotation: {
           type: 'constant', 
           rotationAxis: new THREE.Vector3(0, 1, 0).normalize(),
@@ -272,11 +243,17 @@ export class ClientProjectile {
         }
       },
       bomblet: {
-        trailConfig: {
-          trailType: 'none',
-          trailSize: 1,
-          emitRate: 50
-        },
+        trailType: 'none',
+        burnTrailType: 'smallTrail',
+        rotation: {
+          type: 'constant',
+          rotationAxis: new THREE.Vector3(0.3, 1, 0).normalize(),
+          rotationSpeed: 200
+        }
+      },
+      parabomblet: {
+        trailType: 'none',
+        burnTrailType: 'smallTrail',
         rotation: {
           type: 'constant',
           rotationAxis: new THREE.Vector3(0.3, 1, 0).normalize(),
@@ -284,11 +261,8 @@ export class ClientProjectile {
         }
       },
       spike_bomb: {
-        trailConfig: {
-          trailType: 'basic',
-          trailSize: 1,
-          emitRate: 50
-        },
+        trailType: 'smallTrail',
+        burnTrailType: 'none',
         rotation: {
           type: 'constant',
           rotationAxis: new THREE.Vector3(0.3, 1, 0).normalize(),
@@ -296,11 +270,8 @@ export class ClientProjectile {
         }
       },
       default: {
-        trailConfig: {
-          trailType: 'basic',
-          trailSize: 1,
-          emitRate: 30
-        },
+        trailType: 'trail',
+        burnTrailType: 'burnTrail',
         rotation: {
           type: 'velocity',
           rotationAxis: null,
@@ -310,28 +281,71 @@ export class ClientProjectile {
     };
 
     const config = styles[this.projectileStyle] || styles.default;
-    this.trailConfig = {
-      ...config.trailConfig,
-      position: this.position,  // initial position
-      trailId: `${this.projectileId}trail`
-    };
+    this.trailType = config.trailType;
+    this.burnTrailType = config.burnTrailType;
     this.rotationConfig = config.rotation;
   }
 
   triggerExplosion(impactEvent) {
-    this.explosion.setPosition(this.position);
-    this.explosion.burst();
-    this.explosionFlash.setPosition(this.position);
-    this.explosionFlash.burst();
-    this.smoke.setPosition(this.position);
+    // Use the pooled emitters for explosions
+    if (this.explosion) {
+      const explosion = this.explosion; // Capture the reference
+      explosion.setPosition(this.position);
+      explosion.burst();
+      
+      // Return the explosion emitter to the pool after a delay
+      setTimeout(() => {
+        this.emitterPool.returnEmitter('explosion', this.projectileId);
+        this.explosion = null;
+      }, 2000); // After particles should be complete
+    }
     
-    // Delay the smoke burst by 500ms (0.5 seconds)
-    setTimeout(() => {
-      this.smoke.burst();
-    }, 500);
+    if (this.explosionFlash) {
+      const explosionFlash = this.explosionFlash; // Capture the reference
+      explosionFlash.setPosition(this.position);
+      explosionFlash.burst();
+      
+      // Return the flash emitter to the pool after a delay
+      setTimeout(() => {
+        this.emitterPool.returnEmitter('explosionFlash', this.projectileId);
+        this.explosionFlash = null;
+      }, 500); // After flash should be complete
+    }
+    
+    if (this.smoke) {
+      const smoke = this.smoke; // Capture the reference
+      const projectileId = this.projectileId; // Capture the ID
+      const emitterPool = this.emitterPool; // Capture the pool
+      const position = this.position.clone(); // Clone the position
+      
+      smoke.setPosition(position);
+      
+      // Delay the smoke burst by 500ms
+      setTimeout(() => {
+        // Check if the smoke effect still exists (hasn't been returned to pool)
+        smoke.burst();
+        
+        // Return the smoke emitter after a delay
+        setTimeout(() => {
+          emitterPool.returnEmitter('smoke', projectileId);
+          // No need to set this.smoke = null here since we're using the local reference
+          if (this.smoke === smoke) {
+            this.smoke = null;
+          }
+        }, 10000); // After smoke should be complete
+      }, 500);
+    }
   
-    this.trail.deactivate();
-    this.burnTrail.deactivate();
+    // Deactivate and return trail emitters
+    if (this.trail) {
+      this.emitterPool.deactivateAndReturnEmitter(this.trailType, this.projectileId);
+      this.trail = null;
+    }
+    
+    if (this.burnTrail) {
+      this.emitterPool.deactivateAndReturnEmitter(this.burnTrailType, this.projectileId);
+      this.burnTrail = null;
+    }
   }
   
   getPosition() {
@@ -341,6 +355,35 @@ export class ClientProjectile {
   destroy() {
     if (this.isDestroyed) return;
     this.isDestroyed = true;
+    
+    // Return all emitters to the pool
+    if (this.emitterPool) {
+      if (this.trail) {
+        this.emitterPool.deactivateAndReturnEmitter(this.trailType, this.projectileId);
+        this.trail = null;
+      }
+      
+      if (this.burnTrail) {
+        this.emitterPool.deactivateAndReturnEmitter(this.burnTrailType, this.projectileId);
+        this.burnTrail = null;
+      }
+      
+      // For one-time emitters that might not have been used yet
+      if (this.explosion) {
+        this.emitterPool.returnEmitter('explosion', this.projectileId);
+        this.explosion = null;
+      }
+      
+      if (this.explosionFlash) {
+        this.emitterPool.returnEmitter('explosionFlash', this.projectileId);
+        this.explosionFlash = null;
+      }
+      
+      if (this.smoke) {
+        this.emitterPool.returnEmitter('smoke', this.projectileId);
+        this.smoke = null;
+      }
+    }
     
     if (this.mesh) {
       this.scene.remove(this.mesh);

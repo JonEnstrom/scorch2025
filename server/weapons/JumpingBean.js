@@ -9,7 +9,7 @@ export class JumpingBeanWeapon {
 
     // Weapon configuration
     this.maxBounces = 15;
-    this.bounceRadius = 10;      // Base radius for bounce spread
+    this.bounceRadius = 1;      // Base radius for bounce spread
     this.radiusVariance = 0.5;  // Variance in bounce radius
 
     // Physics and timing settings
@@ -28,9 +28,9 @@ export class JumpingBeanWeapon {
     this.craterSize = 20;           // Size of terrain deformation
     
     // Trajectory settings
-    this.basePower = 300;           // Initial projectile power
+    this.basePower = 30;           // Initial projectile power
     this.verticalBias = 1.6;        // How much to bias upward bounces
-    this.gravity = -1500;            // Stronger gravity for snappier arcs
+    this.gravity = -150;            // Stronger gravity for snappier arcs
 
     // Register weapon handler
     projectileManager.registerWeaponHandler(
@@ -56,7 +56,7 @@ export class JumpingBeanWeapon {
       doesCollide: true,
       
       // Physics properties
-      gravity: -300,
+      gravity: -30,
       timeFactor: this.baseTimeFactor,
       minTimeFactor: this.baseTimeFactor,
       

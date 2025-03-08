@@ -8,6 +8,15 @@ export default defineConfig({
       'three/addons': path.resolve('node_modules/three/examples/jsm')
     }
   },
+
+  optimizeDeps: {
+    exclude: ['ammo.js']
+  },
+  build: {
+    commonjsOptions: {
+      include: [/ammo\.js/]
+    }
+  },
   
   server: {
     port: 5173,

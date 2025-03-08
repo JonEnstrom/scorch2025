@@ -23,9 +23,8 @@ export default class GuidedWeapon {
     
     // Calculate future time 
     const currentTime = Date.now();
-    const futureTime = currentTime + 8000; 
+    const futureTime = currentTime + 10000; 
     
-    // Filter helicopters to only target those that will be within -1200 to +1200 on both X and Y axes in 6 seconds
     const helicopters = allHelicopters.filter(helicopter => {
       // Get the predicted future position of the helicopter
       const futurePosition = this.projectileManager.helicopterManager.getHelicopterPositionAtTime(helicopter.id, futureTime);
@@ -35,10 +34,10 @@ export default class GuidedWeapon {
       
       // Check if the future position is within our boundary
       return (
-        futurePosition.position.x >= -1200 && 
-        futurePosition.position.x <= 1200 && 
-        futurePosition.position.y >= -1200 && 
-        futurePosition.position.y <= 1200
+        futurePosition.position.x >= -80 && 
+        futurePosition.position.x <= 80 && 
+        futurePosition.position.y >= -80 && 
+        futurePosition.position.y <= 80
       );
     });
     
@@ -51,7 +50,6 @@ export default class GuidedWeapon {
     // Select a random helicopter as the target from those that will be in range
     const targetHelicopter = helicopters[Math.floor(Math.random() * helicopters.length)];
     
-    console.log(`Guided missile targeting helicopter: ${targetHelicopter.id} that will be within range (-1200 to +1200 on X and Y axes) in 6 seconds`);
     
     const projectileData = [{
       startPos: spawnPos.clone(),
@@ -68,9 +66,10 @@ export default class GuidedWeapon {
       // Guided missile specific properties
       isGuided: true,
       targetHelicopterId: targetHelicopter.id,
-      maxTurnRate: 0.01,  // Radians per simulation step
+      maxTurnRate: 0.05,  // Radians per simulation step
+      addedTurnRatePerSecond: 0.015,
       guidanceDelay: 2000, // ms before guidance kicks in
-      acceleration: 350   // Faster acceleration than standard
+      acceleration: 45 
     }];
     
     // Precompute the flight
@@ -100,7 +99,7 @@ export default class GuidedWeapon {
       : 0;
     
     // Turn change after a delay
-    const totalDelay = finalEventTime + gameCore.turnChangeDelay;
+    const totalDelay = finalEventTime + gameCore.turnChangeDelay + 4000;
     
     setTimeout(async () => {
       if (!(await gameCore.roundManager.checkRoundOver())) {
@@ -143,21 +142,24 @@ export default class GuidedWeapon {
       .emit('fullProjectileTimeline', timeline);
     
     this.projectileManager.scheduleTimeline(timeline, Date.now(), gameCore);
-    
-    const finalEventTime = timeline.length
-      ? Math.max(...timeline.map(ev => ev.time))
-      : 0;
-    
-    const totalDelay = finalEventTime + gameCore.turnChangeDelay;
-    
-    setTimeout(async () => {
-      if (!(await gameCore.roundManager.checkRoundOver())) {
-        gameCore.playerManager.advanceTurn();
-        gameCore.playerManager.currentPlayer =
-          gameCore.playerManager.turnManager.getCurrentPlayerId();
-        gameCore.playerManager.currentPlayerHasFired = false;
-      }
-    }, totalDelay);
+        // Find the final time in the timeline
+        const finalEventTime = timeline.length
+        ? Math.max(...timeline.map(ev => ev.time))
+        : 0;
+      
+      // Turn change after a delay
+      const totalDelay = finalEventTime + gameCore.turnChangeDelay;
+      
+      setTimeout(async () => {
+        if (!(await gameCore.roundManager.checkRoundOver())) {
+          gameCore.playerManager.advanceTurn();
+          gameCore.playerManager.currentPlayer =
+            gameCore.playerManager.turnManager.getCurrentPlayerId();
+          gameCore.playerManager.currentPlayerHasFired = false;
+        }
+      }, totalDelay);
+  
+
   }
 
   destroy() {

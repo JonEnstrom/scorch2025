@@ -15,8 +15,8 @@ export default class VolleyWeapon {
     this.minVerticalVelocity = 0.05; // Minimum vertical component after bounce
     
     // Gravity settings
-    this.defaultGravity = -500;      // Default gravity for bouncing projectiles
-    this.noBounceGravity = -300;     // Different gravity for non-bouncing projectiles
+    this.defaultGravity = -40;      // Default gravity for bouncing projectiles
+    this.noBounceGravity = -30;     // Different gravity for non-bouncing projectiles
   }
 
   /**
@@ -162,7 +162,7 @@ export default class VolleyWeapon {
       
       // Bounce settings
       preImpactBounces: bounceCount,
-      preImpactBouncePower: 200,
+      preImpactBouncePower: 20,
       bounciness: this.bounciness,
       upwardBias: this.upwardBias,
       minVerticalVelocity: this.minVerticalVelocity,
@@ -186,7 +186,7 @@ export default class VolleyWeapon {
       // Impact properties
       craterSize: 25,
       baseDamage: baseDamage,
-      aoeSize: 50
+      aoeSize: 5
     };
   }
   

@@ -163,7 +163,7 @@ export class ShieldManager {
         }
 
         this.shieldMesh = new THREE.Mesh(this.shieldGeometry, this.shieldMaterial.clone());
-        this.shieldMesh.scale.copy(player.scale).multiplyScalar(30);
+        this.shieldMesh.scale.copy(player.scale).multiplyScalar(3);
 
         // Ensure the shield doesn't interfere with player controls by disabling interactions
         this.shieldMesh.name = 'playerShield';

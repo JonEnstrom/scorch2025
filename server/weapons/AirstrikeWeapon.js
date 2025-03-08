@@ -106,22 +106,22 @@ export default class AirStrikeWeapon {
         const bombData = {
           playerId,
           preImpactBounces: 1,
-          preImpactBouncePower: 50,
+          preImpactBouncePower: 5,
           weaponId: this.id,
           weaponCode: this.weaponCode + '_BOMBLET',
           startPos: bombSpawnPos,
           direction: bombDir,
-          power: 150,
+          power: 15,
           isFinalProjectile: false, // bombs themselves are not final
           explosionSize: 3.0,
-          projectileStyle: 'bomblet',
+          projectileStyle: 'parabomblet',
           craterSize: 75,
-          aoeSize: 150,
+          aoeSize: 15,
           baseDamage: 50,
           
           // Standard speed for bomblets
           timeFactor: this.bombletTimeFactor,
-          gravity: -200
+          gravity: -20
         };
   
         this.projectileManager.simulateSubProjectile(
@@ -159,7 +159,7 @@ export default class AirStrikeWeapon {
             weaponCode: this.weaponCode,
             explosionSize: 0.2,  // small explosion for carrier
             craterSize: 10,
-            aoeSize: 100,
+            aoeSize: 10,
             baseDamage: 20,      // Minimal damage from carrier explosion
             impactType: 'self-destruct'
           };

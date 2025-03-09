@@ -24,12 +24,13 @@ export class InputManager {
             if (!this.inventoryOpen) {
                 this.processInput();
             }
-
+            // LEGACY CONTROL - INSTANT FIRE
             if (event.code === 'Space' && 
                 this.game.playerManager.isCurrentPlayer(this.game.playerManager.playerId) &&
-                !this.inventoryOpen) {
+                !this.game.currentPlayerHasFired) {
                 const currentTank = this.game.playerManager.getPlayer(this.game.playerManager.playerId);
                 const weaponCode = currentTank.getSelectedWeapon();
+                this.game.currentPlayerHasFired = true;
                 this.socket.emit('clientInput', { 
                     action: 'fire', 
                     weaponCode: weaponCode
@@ -44,7 +45,7 @@ export class InputManager {
             this.keys.delete(event.code);
 
             if (event.code === 'KeyC' && !this.inventoryOpen) {
-                if (this.game.activeProjectile) {
+                if (this.game.projectiles.length) {
                     this.game.cameraManager.setView('chase');
                 } else {
                     this.game.cameraManager.setView('thirdPerson');

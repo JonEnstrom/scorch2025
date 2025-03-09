@@ -17,7 +17,9 @@ export class ClientProjectile {
       explosionType,
       explosionSize,
       craterSize,
-      isFinalProjectile
+      isFinalProjectile,
+      soundStyle = 'normal',
+      soundImpactStyle = 'normal'
     } = projectileData;
 
     this.projectileId = projectileId;
@@ -44,6 +46,9 @@ export class ClientProjectile {
     this.explosionSize = explosionSize || 1;
     this.craterSize = craterSize || 20;
     this.isFinalProjectile = isFinalProjectile || false;
+
+    this.soundStyle = soundStyle;
+    this.soundImpactStyle = soundImpactStyle;
 
     // Scene references
     this.scene = scene;

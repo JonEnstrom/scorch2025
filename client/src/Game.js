@@ -62,6 +62,7 @@ export class Game extends EventEmitter {
         this.socket = socket;
         this.projectiles = [];
         this.projectileMap = new Map();
+        this.currentPlayerHasFired = false;
         this.playerManager = new PlayerManager(this);
         this.setupGameState();
 
@@ -417,9 +418,15 @@ async loadNewTerrain(terrain) {
         if (this.currentPlayerArrow) {
             this.currentPlayerArrow.setTarget(currentTank.mesh);
         }
+
+        // reset the current player has fired flag
+        this.currentPlayerHasFired = false;
+        
         
         // Check if it's the local player's turn
         const isLocalPlayerTurn = currentPlayerId === this.playerManager.playerId;
+
+        if (isLocalPlayerTurn) this.cameraManager.setFreeflyMode('auto');
         
         if (isLocalPlayerTurn) {
             // If it's our turn, always set to third person view

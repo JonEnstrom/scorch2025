@@ -38,7 +38,8 @@ export default class AirStrikeWeapon {
       isFinalProjectile: true,
       projectileStyle: 'balloon',
       projectileScale: 4,
-      baseDamage: 0, // The carrier itself can do minimal damage
+      baseDamage: 0,
+      soundStyle: 'none',
       
       // Custom physics for the carrier missile
       timeFactor: this.carrierTimeFactor,

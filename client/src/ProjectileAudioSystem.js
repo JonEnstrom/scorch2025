@@ -12,7 +12,7 @@ export class ProjectileAudioSystem {
         this.audioContext = null;
         this.activeAudioSources = new Map(); // Map projectileId -> audio data
         this.activeExplosions = new Map(); // Track active explosion sounds
-        this.maxSimultaneousExplosions = 3; // Maximum number of full-volume explosions
+        this.maxSimultaneousExplosions = 1; // Maximum number of full-volume explosions
         
         // Create a master bus for all explosion sounds
         this.explosionMasterBus = null;
@@ -48,7 +48,6 @@ export class ProjectileAudioSystem {
         this.explosionCompressor.connect(this.audioContext.destination);
     }
     
-    // [existing projectile sound methods remain the same]
 /**
  * Create projectile sound based on spawn event
  * @param {String} projectileId - The unique ID of the projectile
@@ -70,7 +69,13 @@ createProjectileSound(projectileId, projectile, spawnEvent) {
     
     // Create a positional audio source
     const sound = new THREE.PositionalAudio(this.listener);
-    
+
+    // Configure spatial audio properties
+    sound.setRefDistance(2);
+    sound.setMaxDistance(100);
+    sound.setRolloffFactor(1);
+    sound.setDistanceModel('linear');
+
     // Create audio nodes
     const whistleOsc = this.audioContext.createOscillator();
     whistleOsc.type = 'sine';
@@ -82,19 +87,36 @@ createProjectileSound(projectileId, projectile, spawnEvent) {
     const modGain = this.audioContext.createGain();
     modGain.gain.value = 6;
     
-    const mainGain = this.audioContext.createGain();
-    mainGain.gain.value = 5;
+    // Create noise generator for the whoosh effect
+    const whooshNoise = this.createNoiseGenerator();
+    const whooshFilter = this.audioContext.createBiquadFilter();
+    whooshFilter.type = 'bandpass';
+    whooshFilter.Q.value = 4.5;
+    whooshFilter.frequency.value = 1500; // Higher frequency for whoosh
     
+    const whooshGain = this.audioContext.createGain();
+    whooshGain.gain.value = 0; // Start silent, will ramp up
+    
+    // Create and connect noise generator for added texture to the whistle
+    const noiseNode = this.createNoiseGenerator();
+    const noiseGain = this.audioContext.createGain();
+    noiseGain.gain.value = 2.0;
+    
+    // Whistle path filter
     const filter = this.audioContext.createBiquadFilter();
     filter.type = 'bandpass';
     filter.Q.value = 3.0;
     
-    // Create and connect noise generator for added texture
-    const noiseNode = this.createNoiseGenerator();
-    const noiseGain = this.audioContext.createGain();
-    noiseGain.gain.value = 0.8;
+    // Create master gain for the entire sound
+    const mainGain = this.audioContext.createGain();
+    mainGain.gain.value = 5;
     
-    // Connect everything
+    // Connect the whoosh path
+    whooshNoise.connect(whooshFilter);
+    whooshFilter.connect(whooshGain);
+    whooshGain.connect(mainGain);
+    
+    // Connect the whistle path
     modOsc.connect(modGain);
     modGain.connect(whistleOsc.frequency);
     
@@ -103,6 +125,7 @@ createProjectileSound(projectileId, projectile, spawnEvent) {
     noiseGain.connect(filter);
     
     filter.connect(mainGain);
+    
     // Connect to PositionalAudio by using its "gain" parameter
     mainGain.connect(sound.gain);
     
@@ -126,11 +149,34 @@ createProjectileSound(projectileId, projectile, spawnEvent) {
     
     // Program volume envelope
     mainGain.gain.setValueAtTime(0.05, startTime);
-    mainGain.gain.linearRampToValueAtTime(soundSettings.maxVolume, startTime + 0.1);
+    mainGain.gain.linearRampToValueAtTime(soundSettings.maxVolume, startTime + 0.3);
     
+    // Program whoosh to whistle transition
+    // Start with whoosh sound
+    whooshGain.gain.setValueAtTime(0.01, startTime);
+    whooshGain.gain.linearRampToValueAtTime(0.7, startTime + 0.50); // Quick ramp up for impact
+    whooshGain.gain.linearRampToValueAtTime(0, startTime + 3.8); // Fade out whoosh over 0.8 seconds
+    
+    // Adjust the whoosh filter sweep for more dramatic effect
+    whooshFilter.frequency.setValueAtTime(3000, startTime);
+    whooshFilter.frequency.exponentialRampToValueAtTime(100, startTime + 2.8);
+    
+    // Delayed whistle sound (gradually fades in as whoosh fades out)
+    const whistleGain = this.audioContext.createGain();
+    whistleGain.gain.setValueAtTime(0, startTime);
+    whistleGain.gain.linearRampToValueAtTime(0.5, startTime + 2.3); // Start fading in during whoosh
+    whistleGain.gain.linearRampToValueAtTime(0.0, startTime + 5.8); // Full volume as whoosh completes
+    
+    // Insert the whistleGain in the whistle chain
+    filter.disconnect();
+    filter.connect(whistleGain);
+    whistleGain.connect(mainGain);
+    
+    // Start all audio nodes
     whistleOsc.start(startTime);
     modOsc.start(startTime);
     noiseNode.start(startTime);
+    whooshNoise.start(startTime);
     
     // Store all audio nodes for later updates and cleanup
     this.activeAudioSources.set(projectileId, {
@@ -138,6 +184,10 @@ createProjectileSound(projectileId, projectile, spawnEvent) {
         whistleOsc,
         modOsc,
         noiseNode,
+        whooshNoise,
+        whooshFilter,
+        whooshGain,
+        whistleGain,
         filter,
         mainGain,
         startTime,
@@ -165,7 +215,7 @@ isGuidedMissile(spawnEvent) {
     
     // Check weapon code prefixes that indicate guided weapons
     if (spawnEvent.weaponCode) {
-        const guidedWeaponPrefixes = ['GM', 'AA', 'HM', 'ATGM'];
+        const guidedWeaponPrefixes = ['GW', 'AA', 'HM', 'ATGM'];
         for (const prefix of guidedWeaponPrefixes) {
             if (spawnEvent.weaponCode.startsWith(prefix)) {
                 return true;
@@ -200,9 +250,9 @@ isGuidedMissile(spawnEvent) {
     getSoundSettingsForProjectile(spawnEvent) {
         // Default settings
         const defaults = {
-            startFreq: 850,
-            endFreq: 200,
-            maxVolume: 0.25,
+            startFreq: 1850,
+            endFreq: 1200,
+            maxVolume: 0.02,
             duration: 3.0
         };
         
@@ -267,6 +317,11 @@ createGuidedMissileSound(projectileId, projectile, spawnEvent) {
     
     // Create a positional audio source
     const sound = new THREE.PositionalAudio(this.listener);
+    sound.setRefDistance(2);
+    sound.setMaxDistance(100);
+    sound.setRolloffFactor(1);
+    sound.setDistanceModel('linear');
+
     
     // Create audio nodes
     const engineOsc = this.audioContext.createOscillator();
@@ -296,7 +351,7 @@ createGuidedMissileSound(projectileId, projectile, spawnEvent) {
     // Create and connect noise generator for added texture
     const noiseNode = this.createNoiseGenerator();
     const noiseGain = this.audioContext.createGain();
-    noiseGain.gain.value = 0.6;
+    noiseGain.gain.value = 0.3;
     
     // Connect everything
     pulseOsc.connect(pulseGain);
@@ -318,9 +373,9 @@ createGuidedMissileSound(projectileId, projectile, spawnEvent) {
     }
     
     // Base frequency settings - we'll adjust these with Y position
-    const baseFreq = 1050;
-    const minFreq = 1050;
-    const maxFreq = 4000;
+    const baseFreq = 1500;
+    const minFreq = 1500;
+    const maxFreq = 3500;
     
     // Get initial Y position
     const initialY = projectile.position ? projectile.position.y : 
@@ -334,7 +389,7 @@ createGuidedMissileSound(projectileId, projectile, spawnEvent) {
     
     // Program volume envelope with quick fade-in
     mainGain.gain.setValueAtTime(0.01, startTime);
-    mainGain.gain.linearRampToValueAtTime(0.35, startTime + 0.2);
+    mainGain.gain.linearRampToValueAtTime(0.35, startTime + 0.01);
     
     engineOsc.start(startTime);
     pulseOsc.start(startTime);
@@ -380,12 +435,11 @@ updateGuidedMissileSound(projectileId, projectile) {
                      (projectile.mesh ? projectile.mesh.position.y : 100);
     
     // Calculate relative altitude (height above terrain)
-    const terrainHeight = audioData.terrainHeight || 0;
-    const relativeAltitude = Math.max(0, currentY - terrainHeight);
+    const relativeAltitude = currentY;
     
     // Map altitude to frequency range
     // Higher altitude = higher frequency
-    const maxAltitude = 500; // Maximum altitude to consider for scaling
+    const maxAltitude = 200; // Maximum altitude to consider for scaling
     const altitudeRatio = Math.min(relativeAltitude / maxAltitude, 1.0);
     
     // Calculate frequency based on altitude
@@ -393,35 +447,26 @@ updateGuidedMissileSound(projectileId, projectile) {
         (audioData.maxFreq - audioData.minFreq) * altitudeRatio;
     
     // Add some variation to avoid monotonous sound
-    const variationAmount = 30; // Hz variation
-    const variation = Math.sin(now * 3) * variationAmount;
+    const variationAmount = 200; // Hz variation
+    const variation = Math.sin(now * 1) * variationAmount;
     targetFreq += variation;
     
     // Update oscillator frequency with a smooth transition
     audioData.engineOsc.frequency.setTargetAtTime(
         targetFreq, 
         now, 
-        0.1 // Time constant for smooth transition
+        0.03 // Time constant for smooth transition
     );
     
     // Update filter frequency for tonal changes
     audioData.filter1.frequency.setTargetAtTime(
-        1500 + 1000 * altitudeRatio,
+        3000 * altitudeRatio,
         now,
-        0.2
+        0.02
     );
     
-    // Adjust volume based on relative altitude (quieter at very high altitudes)
-    if (relativeAltitude > 300) {
-        const volumeReduction = Math.min((relativeAltitude - 300) / 200, 0.5);
-        audioData.mainGain.gain.setTargetAtTime(
-            0.35 * (1 - volumeReduction),
-            now,
-            0.3
-        );
-    } else {
-        audioData.mainGain.gain.setTargetAtTime(0.35, now, 0.3);
-    }
+        audioData.mainGain.gain.setTargetAtTime(0.35, now, 1.0);
+    
 }
 
 /**
@@ -462,7 +507,6 @@ updateProjectileSound(projectileId, progress, projectile, currentTime) {
         return;
     }
     
-    // Regular projectile sound update logic (unchanged)
     // Avoid redundant updates for small changes
     if (Math.abs(progress - audioData.lastProgress) < 0.01) return;
     
@@ -480,7 +524,7 @@ updateProjectileSound(projectileId, progress, projectile, currentTime) {
     audioData.filter.frequency.setValueAtTime(currentFreq, now);
     
     // Fade out sound as we approach the end of the trajectory
-    if (progress > 0.85) {
+    if (progress > 1.0) {
         const fadeOutProgress = (progress - 0.85) / 0.15; // 0 to 1 for last 15% of trajectory
         const fadeVolume = 1 - fadeOutProgress;
         audioData.mainGain.gain.setValueAtTime(
@@ -513,6 +557,12 @@ updateProjectileSound(projectileId, progress, projectile, currentTime) {
         
         // Create positional audio for the impact
         const sound = new THREE.PositionalAudio(this.listener);
+
+        sound.setRefDistance(2);
+        sound.setMaxDistance(100);
+        sound.setRolloffFactor(1);
+        sound.setDistanceModel('linear');
+    
         
         // Create a temporary object at the impact location
         const soundObject = new THREE.Object3D();
@@ -580,7 +630,7 @@ updateProjectileSound(projectileId, progress, projectile, currentTime) {
         
         // Add randomness to filter frequency
         const filterVariation = Math.random() * 100 - 50; // -50 to +50 Hz
-        noiseFilter.frequency.value = 800 + filterVariation;
+        noiseFilter.frequency.value = 250 + filterVariation;
         
         // Envelope for the explosion
         const envelope = this.audioContext.createGain();
@@ -614,9 +664,9 @@ updateProjectileSound(projectileId, progress, projectile, currentTime) {
         const releaseVariation = Math.random() * 0.2;
         
         const attackTime = 0.02 + attackVariation;
-        const decayTime = 0.2 + decayVariation;
+        const decayTime = 0.1 + decayVariation;
         const sustainTime = (0.3 * explosionSize) + sustainVariation;
-        const releaseTime = (1.0 * explosionSize) + releaseVariation;
+        const releaseTime = (0.6 * explosionSize) + releaseVariation;
         
         // Calculate total duration
         const totalDuration = attackTime + decayTime + sustainTime + releaseTime;
@@ -677,7 +727,7 @@ updateProjectileSound(projectileId, progress, projectile, currentTime) {
         const noise = this.createNoiseGenerator();
         const noiseFilter = this.audioContext.createBiquadFilter();
         noiseFilter.type = 'lowpass';
-        noiseFilter.frequency.value = 600;
+        noiseFilter.frequency.value = 800;
         
         const envelope = this.audioContext.createGain();
         envelope.gain.value = 0;
@@ -699,7 +749,7 @@ updateProjectileSound(projectileId, progress, projectile, currentTime) {
         const attackTime = 0.01;
         const decayTime = 0.1;
         const sustainTime = 0.1 * explosionSize;
-        const releaseTime = 0.3 * explosionSize;
+        const releaseTime = 0.6 * explosionSize;
         
         // Calculate total duration
         const totalDuration = attackTime + decayTime + sustainTime + releaseTime;

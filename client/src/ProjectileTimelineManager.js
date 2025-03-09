@@ -32,10 +32,6 @@ export class ProjectileTimelineManager {
         // Create the emitter pool
         this.emitterPool = new EmitterPool(this.particleSystem);
         
-        // A smaller pool of lights (10). We'll place them at the first ten impact points.
-        this.lights = [];
-        this.MAX_LIGHTS = 0;
-        this.initLights();
 
         // We'll create a small ephemeral sphere at each explosion spot for 300ms.
         // We store them here so we can remove them after their time expires.
@@ -133,23 +129,23 @@ export class ProjectileTimelineManager {
         const styleConfigs = {
             missile: { 
                 color: 0xaaaaaa, 
-                geometry: new THREE.ConeGeometry(2 * scale, 6 * scale, 16) 
+                geometry: new THREE.ConeGeometry(0.2 * scale, 0.6 * scale, 16) 
             },
             balloon: { 
                 color: 0xcc5555, 
-                geometry: new THREE.SphereGeometry(2.5 * scale, 16, 16) 
+                geometry: new THREE.SphereGeometry(.25 * scale, 16, 16) 
             },
             bomblet: { 
                 color: 0x666666, 
-                geometry: new THREE.SphereGeometry(1.5 * scale, 8, 8) 
+                geometry: new THREE.SphereGeometry(0.15 * scale, 8, 8) 
             },
             spike_bomb: { 
                 color: 0x333333, 
-                geometry: new THREE.DodecahedronGeometry(2 * scale, 0) 
+                geometry: new THREE.DodecahedronGeometry(0.2 * scale, 0) 
             },
             default: { 
                 color: 0xaaaaaa, 
-                geometry: new THREE.SphereGeometry(1.5 * scale, 16, 16) 
+                geometry: new THREE.SphereGeometry(0.15 * scale, 16, 16) 
             }
         };
         
@@ -167,35 +163,7 @@ export class ProjectileTimelineManager {
         return mesh;
     }
 
-    initLights() {
-        // Create up to 10 point lights, place them off-screen initially, and add them to the scene
-        // We'll move them to the first 10 impact points in queueTimeline(...)
-        for (let i = 0; i < this.MAX_LIGHTS; i++) {
-            // You can tweak color/intensity as desired
-            const light = new THREE.PointLight(0xffffff, 1500, 1500);
-            light.position.set(10000, 10000, 10000); 
-            this.game.scene.add(light);
-            this.lights.push(light);
-        }
-    }
     
-    placeLightsForImpacts(timelineData) {
-        // Find all impact events, sort by time, place up to 10 lights at those positions
-        const impactEvents = timelineData
-            .filter(evt => evt.type === 'projectileImpact')
-            .sort((a, b) => a.time - b.time);
-        
-        for (let i = 0; i < this.lights.length; i++) {
-            const light = this.lights[i];
-            if (i < impactEvents.length) {
-                const pos = impactEvents[i].position;
-                light.position.set(pos.x, pos.y, pos.z);
-            } else {
-                // If no more impact events, move the remaining lights off scene
-                light.position.set(10000, 10000, 10000);
-            }
-        }
-    }
     
     async queueTimeline(timelineData) {
         // Reset previous timeline state
@@ -228,8 +196,6 @@ export class ProjectileTimelineManager {
         // Reset camera flag
         this.cameraAdjustedThisTimeline = false;
 
-        // Move lights to the first 10 impacts before the playback starts
-        this.placeLightsForImpacts(timelineData);
     }
     
     resetTimelineState() {
@@ -312,7 +278,9 @@ export class ProjectileTimelineManager {
             explosionType: spawnEvent.explosionType,
             explosionSize: spawnEvent.explosionSize,
             craterSize: spawnEvent.craterSize,
-            isFinalProjectile: spawnEvent.isFinalProjectile
+            isFinalProjectile: spawnEvent.isFinalProjectile,
+            soundStyle: spawnEvent.soundStyle || 'normal',
+            soundImpactStyle: spawnEvent.soundImpactStyle || 'normal'
         };
         
         // Load the projectile model
@@ -595,13 +563,7 @@ export class ProjectileTimelineManager {
         this.modelCache.clear();
         this.loadingPromises.clear();
         
-        // Remove all lights from the scene
-        this.lights.forEach(light => {
-            this.game.scene.remove(light);
-        });
-        this.lights = [];
-
-        // Clean up explosion spheres if any remain
+             // Clean up explosion spheres if any remain
         this.explosionSpheres.forEach(sphereData => {
             this.game.scene.remove(sphereData.mesh);
             sphereData.mesh.geometry.dispose();

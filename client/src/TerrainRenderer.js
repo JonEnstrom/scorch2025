@@ -328,7 +328,7 @@ export class TerrainRenderer {
       this.intersectionCamera = new THREE.OrthographicCamera(
         -width/2, width/2, depth/2, -depth/2, -500, 500
       );
-      this.intersectionCamera.position.set(0, 100, 0); // Position above terrain
+      this.intersectionCamera.position.set(0, 200, 0); // Position above terrain
       this.intersectionCamera.lookAt(0, 0, 0); // Look down at origin
       
       this.intersectionScene = new THREE.Scene();

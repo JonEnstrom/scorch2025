@@ -76,8 +76,9 @@ const InventorySelector = ({
 
   // Long-press sends different commands based on the inventory type.
   const handleLongPress = () => {
-    if (!isLocalTurn) return;
+    if (!isLocalTurn || game.currentPlayerHasFired) return;
     if (inventoryType === 'weapon') {
+      game.currentPlayerHasFired = true;
       game.socket.emit('clientInput', {
         action: 'fire',
         weaponCode: currentSelectedCode,
@@ -131,7 +132,7 @@ const InventorySelector = ({
             <LongPressButton
               label={longPressLabel}
               onLongPress={handleLongPress}
-              pressDuration={1200}
+              pressDuration={600}
               disabled={!isLocalTurn}
             />
           </div>

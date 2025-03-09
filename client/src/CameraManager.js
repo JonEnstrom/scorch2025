@@ -8,12 +8,13 @@ class SpringArm {
         this.targetLength = cameraManager.thirdPersonDistance;
         this.currentLength = this.targetLength;
         this.minimumLength = 5; // Minimum arm length of 5 units
+        this.maximumLength = 200; // Maximum arm length
         this.smoothingSpeed = 0.2; // How fast the arm adjusts to new lengths
         this.collisionOffset = 1; // Distance to keep from collision points
         this.origin = new THREE.Vector3(); // Where the arm starts (player position)
         this.direction = new THREE.Vector3(); // Direction the arm extends
         this.end = new THREE.Vector3(); // Where the arm ends (camera position)
-        this.yThreshold = 100; // Y-threshold for collision detection
+        this.yThreshold = 100; // Y-threshold for collision detection with side walls
         
         // Add flag to control terrain checking
         this.shouldCheckTerrain = false;
@@ -108,10 +109,7 @@ class SpringArm {
             this.lastValidLength = desiredLength;
             // Reset the flag after checking
             this.shouldCheckTerrain = false;
-        } else {
-            // Use the last valid length from terrain check
-            desiredLength = Math.min(desiredLength, this.lastValidLength);
-        }
+        } 
 
         // Ensure the desiredLength is not less than the minimum length
         desiredLength = Math.max(desiredLength, this.minimumLength);
@@ -132,12 +130,13 @@ class SpringArm {
     }
 
     setTargetLength(length) {
-        // Ensure the targetLength is not less than the minimum length
-        this.targetLength = Math.max(length, this.minimumLength);
-        // When target length changes, we should check terrain again
-        this.shouldCheckTerrain = true;
+        this.targetLength = THREE.MathUtils.clamp(length, this.minimumLength, this.maximumLength);
     }
 
+    // Add a method to adjust the length by a delta
+    adjustLength(delta) {
+        this.setTargetLength(this.targetLength + delta);
+    }
     getCurrentLength() {
         return this.currentLength;
     }
@@ -237,7 +236,7 @@ export class CameraManager {
         // --------------------
         //   Projectile View
         // --------------------
-        this.projectileOffset = new THREE.Vector3(0, 10, 1);
+        this.projectileOffset = new THREE.Vector3(0, 20, 3);
         this.projectileRotationOffset = new THREE.Euler(-Math.PI / 4, Math.PI, 0);
         this.currentProjectile = null;
         this.projectileLerpSpeed = 0.03;
@@ -265,12 +264,12 @@ export class CameraManager {
         // --------------------
         this.minCameraHeight = 1;
 
+        this.springArm = new SpringArm(this);
+
         this.setupEventListeners();
         this.setupMouseWheelInput();
         this.setupKeyboardInput();
 
-        // Create our new spring arm with terrain collision checks
-        this.springArm = new SpringArm(this);
     }
 
     setupEventListeners() {
@@ -483,13 +482,14 @@ getSpectatorMode() {
                     this.overheadMaxZoom
                 );
             } else if (this.currentView === 'thirdPerson') {
-                this.thirdPersonDistance = THREE.MathUtils.clamp(
-                    this.thirdPersonDistance + delta,
-                    minDistance,
-                    maxDistance
+                this.springArm.adjustLength(delta);
+            } else if (this.currentView === 'preGame') {
+                this.preGameRadius = THREE.MathUtils.clamp(
+                    this.preGameRadius + delta,
+                    this.springArm.minimumLength,
+                    this.springArm.maximumLength
                 );
-                // Update spring arm target length
-                this.springArm.setTargetLength(this.thirdPersonDistance);
+            
             } else if (this.currentView === 'preGame') {
                 this.preGameRadius = THREE.MathUtils.clamp(
                     this.preGameRadius + delta,
@@ -505,6 +505,14 @@ getSpectatorMode() {
                 );
             }
         });
+    }
+
+    getThirdPersonDistance() {
+        return this.springArm.getTargetLength();
+    }
+
+    setThirdPersonDistance(distance) {
+        return this.springArm.setTargetLength(distance);
     }
 
     setTarget(target) {

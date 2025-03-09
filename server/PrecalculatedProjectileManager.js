@@ -22,6 +22,8 @@ class SimulatedProjectile {
     this.bounceCount = data.bounceCount || 0;
     this.doesCollide = data.doesCollide ?? true;
     this.craterSize = data.craterSize ?? 20;
+    this.soundStyle = data.soundStyle ?? 'normal';
+    this.soundImpactStyle = data.soundImpactStyle ?? 'normal';
     this.aoeSize = data.aoeSize ?? 5;
     this.baseDamage = data.baseDamage ?? 50;
     this.explosionSize = data.explosionSize ?? 1;
@@ -906,6 +908,7 @@ export default class PrecalculatedProjectileManager {
     
           // Only apply damage if greater than zero
           if (event.damage > 0) {
+            console.log(event);
             const damageResult = ArmorShieldManager.applyDamage(player, event.damage);
       
             this.io.to(this.gameId).emit('playerDamaged', {

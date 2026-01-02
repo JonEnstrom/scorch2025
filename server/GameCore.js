@@ -57,6 +57,9 @@ export default class GameCore {
     this.emptyGameTimer = null;
     this.EMPTY_GAME_TIMEOUT = 60000;
     this.lastPlayerLeftTime = null;
+    this.lastActionTime = Date.now();
+    this.ACTION_TIMEOUT = 5 * 60 * 1000; // 5 minutes
+    this.inactivityCheckInterval = null;
 
     // Initialize game
 
@@ -73,6 +76,33 @@ export default class GameCore {
     
     console.log(`[NEW GAME CREATED] New Game [${gameId}] created (seed: ${seed}, theme: ${theme}).`);
     this.broadcastLobbyInfo();
+    this.startInactivityCheck();
+  }
+
+  recordAction() {
+    this.lastActionTime = Date.now();
+  }
+
+  startInactivityCheck() {
+    if (this.inactivityCheckInterval) {
+      clearInterval(this.inactivityCheckInterval);
+    }
+
+    this.inactivityCheckInterval = setInterval(() => {
+      const timeSinceLastAction = Date.now() - this.lastActionTime;
+
+      if (timeSinceLastAction >= this.ACTION_TIMEOUT) {
+        console.log(`[GAME INACTIVE] Game [${this.gameId}] had no actions for ${this.ACTION_TIMEOUT / 60000} minutes. Shutting down.`);
+        this.destroy();
+      }
+    }, 60000); // Check every minute
+  }
+
+  clearInactivityCheck() {
+    if (this.inactivityCheckInterval) {
+      clearInterval(this.inactivityCheckInterval);
+      this.inactivityCheckInterval = null;
+    }
   }
 
   getRandomCpuName() {
@@ -153,6 +183,8 @@ export default class GameCore {
     const player = this.playerManager.players[userId];
     if (!player) return;
     player.isReady = isReady;
+
+    this.recordAction();
 
     this.networking.io.to(this.gameId).emit('playerReadyStatusChanged', {
       id: userId,
@@ -251,6 +283,7 @@ export default class GameCore {
   }
 
   setupPlayerInGame(socketWrapper, userId, playerName, isSpectator) {
+    this.recordAction();
     const isPreGame = this.roundManager.currentRound === 0;
     this.playerManager.addPlayer(userId, socketWrapper, playerName, isPreGame, isSpectator);
     registerPlayerSocketHandlers(socketWrapper, this);
@@ -412,6 +445,7 @@ if (this.helicopterManager) {
   }
 
   processPlayerInput(userId, input) {
+    this.recordAction();
     processInput(userId, input, this);
   }
 
@@ -569,6 +603,7 @@ if (this.helicopterManager) {
     this.helicopterManager = null;
 
     this.clearEmptyGameTimer();
+    this.clearInactivityCheck();
     this.lastPlayerLeftTime = null;
 
     // Null out references

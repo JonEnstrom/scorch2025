@@ -207,15 +207,16 @@ parentPort.on('message', (message) => {
               gameToJoin.setPlayerReadyStatus(message.data.playerId, ready);
             },
             'chatMessage': (message) => {
+              gameToJoin.recordAction();
               const player = gameToJoin.playerManager.players[message.data.playerId];
               if (!player) return;
-              
+
               const fullMessage = {
                 ...message,
                 player: player.name || message.data.playerId,
                 userId: message.data.playerId
               };
-              
+
               socketProxy.to(gameToJoin.gameId).emit('chatMessage', fullMessage);
               socketProxy.emit('chatMessage', fullMessage);
             },
@@ -223,21 +224,24 @@ parentPort.on('message', (message) => {
               gameToJoin.processPlayerInput(message.data.playerId, input);
             },
             'weaponChange': (tankId, weaponCode) => {
+              gameToJoin.recordAction();
               gameToJoin.playerManager.processWeaponChange(tankId, weaponCode);
             },
             'itemChange': (tankId, itemCode) => {
+              gameToJoin.recordAction();
               gameToJoin.playerManager.processItemChange(tankId, itemCode);
             },
             'disconnect': () => {
               gameToJoin.removePlayer(message.data.playerId);
             },
             'purchaseRequest': ({ itemName, quantity }) => {
+              gameToJoin.recordAction();
               const player = gameToJoin.playerManager.players[message.data.playerId];
               if (!player) {
                 socketProxy.emit('errorMessage', 'Player not found');
                 return;
               }
-              
+
               gameToJoin.itemManager.handlePurchaseRequest(
                 socketProxy,
                 player,
